@@ -2,6 +2,7 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
+import { TaskStore } from "@fusion/core";
 import type { ResearchRun, ResearchSource, Task, TaskDocument } from "@fusion/core";
 import {
   assertAllowedLegalMcpTool,
@@ -189,10 +190,22 @@ describe("legal MCP client configuration and allowlist", () => {
   });
 
   it("redacts every configured env value in diagnostics", () => {
-    expect(redactMcpServerConfig({ command: "cmd", env: { SAFE: "value", TOKEN: "secret" } }).env).toEqual({
+    const redacted = redactMcpServerConfig({
+      command: "cmd",
+      args: ["--header", "Authorization: Bearer obsidian-token-secret-value"],
+      env: { SAFE: "value", TOKEN: "secret" },
+    });
+    expect(redacted.env).toEqual({
       SAFE: "[REDACTED]",
       TOKEN: "[REDACTED]",
     });
+    expect(redacted.args).toEqual(["--header", "[REDACTED]"]);
+  });
+
+  it("times out and closes stdio transports that do not answer MCP initialization", async () => {
+    const client = new StdioLegalMcpClient("qmd", { command: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"] }, process.cwd(), "qmd");
+    await expect(client.listTools(20)).rejects.toThrow(/timed out/);
+    await expect(client.close()).resolves.toBeUndefined();
   });
 });
 
@@ -269,6 +282,7 @@ describe("vault mining receipt normalization", () => {
   it("bounds query and max-result inputs", () => {
     expect(buildVaultMiningQueries({ runId: "CLW-1", matterName: " Acme ", queries: ["Acme", "Retaliation"], maxQueries: 2 })).toEqual(["Acme", "Retaliation"]);
     expect(() => buildVaultMiningQueries({ runId: "CLW-1", queries: "bad" as never })).toThrow(/queries/);
+    expect(() => buildVaultMiningQueries({ runId: "CLW-1", queries: ["valid", ""] })).toThrow(/non-empty/);
     expect(() => validateVaultMiningOverrides({ qmd: { searchToolName: "update" } })).toThrow(/read-only/);
   });
 });
@@ -304,6 +318,44 @@ describe("mineCounterLawsuitVaultSources", () => {
     expect(receiptsDoc?.metadata?.researchRunId).toBe("RR-1");
     expect(statusDoc?.content).toContain("Vault mining status");
     expect((await taskStore.getTaskDocument("FN-1", "counter-lawsuit-stage"))?.content).toContain("vault-mining-receipts");
+  });
+
+  it("persists through the real SQLite-backed ResearchStore lifecycle", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fusion-vault-real-store-"));
+    const store = new TaskStore(root, join(root, ".fusion-global-settings"), { inMemoryDb: true });
+    try {
+      await store.init();
+      await store.createTask({
+        title: "Research memo",
+        description: "research",
+        column: "todo",
+        source: {
+          sourceType: "dashboard_ui",
+          sourceRunId: "CLW-real",
+          sourceMetadata: {
+            workflowKind: "counter-lawsuit-prototype",
+            workflowRunId: "CLW-real",
+            workflowStage: "research-memo",
+            workflowStageIndex: 0,
+          },
+        },
+      });
+      const result = await mineCounterLawsuitVaultSources({
+        taskStore: store,
+        runId: "CLW-real",
+        request: { queries: ["Acme"], maxResultsPerProvider: 2 },
+        mcpClientFactory: async () => null,
+        searchProjectMemoryFn: async () => [{ path: ".fusion/memory/MEMORY.md", lineStart: 1, lineEnd: 1, snippet: "real store excerpt", score: 1, backend: "qmd" }],
+      });
+
+      expect(result.researchRunId).toBeTruthy();
+      const run = store.getResearchStore().getRun(result.researchRunId!);
+      expect(run?.status).toBe("completed");
+      expect(run?.sources[0].reference).toBe(".fusion/memory/MEMORY.md");
+    } finally {
+      await store.close();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("uses QMD project-memory fallback only when QMD MCP is unavailable", async () => {

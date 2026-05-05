@@ -362,17 +362,26 @@ export function validateVaultMiningOverrides(overrides: unknown): VaultMiningPro
 }
 
 export function buildVaultMiningQueries(request: VaultMiningRequest): string[] {
+  let explicitQueries: string[] = [];
+  if (request.queries !== undefined) {
+    if (!Array.isArray(request.queries)) {
+      throw badRequest("queries must be an array of non-empty strings");
+    }
+    explicitQueries = request.queries.map((value) => {
+      if (typeof value !== "string" || !value.trim()) {
+        throw badRequest("queries must contain only non-empty strings");
+      }
+      return value;
+    });
+  }
   const rawQueries = [
     request.matterName,
     request.focus,
     request.vaultScope,
     request.sourceScope,
     request.sourceQuery,
-    ...(request.queries ?? []),
+    ...explicitQueries,
   ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
-  if (request.queries !== undefined && !Array.isArray(request.queries)) {
-    throw badRequest("queries must be an array of non-empty strings");
-  }
   const maxQueries = validateBoundedInteger(request.maxQueries, "maxQueries", DEFAULT_MAX_QUERIES, HARD_MAX_QUERIES);
   const seen = new Set<string>();
   const queries: string[] = [];
@@ -694,8 +703,10 @@ function persistResearchRun(params: {
     },
     lifecycle: { maxAttempts: 1 },
   });
-  params.researchStore.updateStatus(run.id, "completed", { completedAt: new Date().toISOString() });
-  return { ...run, status: "completed" };
+  const now = new Date().toISOString();
+  params.researchStore.updateStatus(run.id, "running", { startedAt: now });
+  params.researchStore.updateStatus(run.id, "completed", { completedAt: now });
+  return { ...run, status: "completed", startedAt: now, completedAt: now };
 }
 
 export async function mineCounterLawsuitVaultSources(options: MineCounterLawsuitVaultSourcesOptions): Promise<VaultMiningResult> {

@@ -59,7 +59,7 @@ export const OBSIDIAN_READ_TOOL_ALLOWLIST = [
 
 const MUTATING_TOOL_RE = /(?:^|[._-])(write|create|update|delete|move|rename|append|patch)(?:$|[._-])/i;
 const SECRET_KEY_RE = /(?:token|secret|key|password|credential|auth)/i;
-const SECRET_VALUE_RE = /(?:sk|pk|ghp|github_pat|bearer|token|secret|api[_-]?key)[A-Za-z0-9_:\-.=+/]{8,}/i;
+const SECRET_VALUE_RE = /(?:sk|pk|ghp|github_pat|token|secret|api[_-]?key)[A-Za-z0-9_:\-.=+/]{8,}|bearer\s+\S{8,}|authorization\s*:/i;
 const DEFAULT_MCP_TIMEOUT_MS = 8_000;
 
 function aliasesForProvider(provider: LegalMcpProviderName): readonly string[] {
