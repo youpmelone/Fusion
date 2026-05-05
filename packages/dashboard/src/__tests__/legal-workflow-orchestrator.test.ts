@@ -419,6 +419,9 @@ describe("generated legal workflow prompts", () => {
       expect(task.description).not.toMatch(/verified and reliable/i);
     }
 
+    expect(taskStore.tasks[0].description).toContain("`vault-mining-receipts` as the required first source manifest");
+    expect(taskStore.tasks[0].description).toContain("source-linked but unverified");
+
     const allDocumentContent = taskStore.documents.map((document) => document.content).join("\n---\n");
     const stageDocumentContent = taskStore.documents.filter((document) => document.key === COUNTER_LAWSUIT_STAGE_DOCUMENT_KEY).map((document) => document.content).join("\n");
     for (const document of taskStore.documents) {
@@ -429,6 +432,8 @@ describe("generated legal workflow prompts", () => {
       expect(document.content).toContain("lineage preservation");
     }
     expect(allDocumentContent).toContain("All generated outputs are drafts only");
+    expect(stageDocumentContent).toContain("Read task document key `vault-mining-receipts` as the required first source manifest");
+    expect(stageDocumentContent).toContain("does not legally verify facts or validate citations");
     for (const key of ["research-memo", "evidence-ledger", "claim-map", "draft-counter-lawsuit-complaint", "red-team-report", "lineage-scoring-log"]) {
       expect(stageDocumentContent).toContain(`Output document key: ${key}`);
     }
