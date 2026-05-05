@@ -301,6 +301,11 @@ describe("GET /settings", () => {
     store = createMockStore();
     mockIsGhAvailable.mockReturnValue(false);
     mockIsGhAuthenticated.mockReturnValue(false);
+    vi.stubEnv("GITHUB_TOKEN", "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   function buildApp() {

@@ -35,7 +35,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --silent=passed-only --reporter=dot"
+    "test": "node ../../scripts/run-vt.mjs run --silent=passed-only --reporter=dot"
   },
   "devDependencies": {
     "@types/dockerode": "^3.3.41",

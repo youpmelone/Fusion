@@ -24,7 +24,6 @@ export interface RunCommandResult {
 
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
 const FORCE_KILL_DELAY_MS = 5_000;
-const NORMAL_CLEANUP_FORCE_KILL_DELAY_MS = 500;
 
 /**
  * Run a shell command without blocking the Node.js event loop.
@@ -131,8 +130,12 @@ export function runCommandAsync(
       // in its process group (for example test runners, qmd indexers, or dev
       // servers launched with `&`). Clean the group after every run so Fusion
       // agents do not leak processes beyond the command lifecycle.
+      //
+      // Do not schedule a delayed SIGKILL here. Once the process group leader
+      // has exited, the OS can quickly reuse its PID as another process group
+      // id. A later kill(-pid, SIGKILL) can then terminate an unrelated test or
+      // verification process.
       signalProcessGroup("SIGTERM");
-      scheduleForceKill(NORMAL_CLEANUP_FORCE_KILL_DELAY_MS);
       resolve({
         stdout,
         stderr,

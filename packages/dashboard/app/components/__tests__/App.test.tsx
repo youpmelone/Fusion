@@ -285,6 +285,12 @@ vi.mock("../../components/ResearchView", () => ({
   ),
 }));
 
+vi.mock("../../components/CounterLawsuitWorkflowView", () => ({
+  CounterLawsuitWorkflowView: ({ projectId }: { projectId?: string }) => (
+    <div data-testid="counter-lawsuit-workflow-view">Counter-lawsuit prototype for {projectId}</div>
+  ),
+}));
+
 vi.mock("../../components/TodoView", () => ({
   TodoView: ({ onPlanningMode }: { onPlanningMode?: (initialPlan: string) => void }) => (
     <div className="todo-view" data-testid="todo-view">
@@ -1425,6 +1431,25 @@ describe("App engine pause (soft pause)", () => {
 });
 
 describe("App view switching", () => {
+  it("opens legal workflows view from overflow and persists view selection", async () => {
+    localStorage.setItem("kb-dashboard-view-mode", "project");
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+    fireEvent.click(await screen.findByTestId("view-overflow-legal-workflows"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("counter-lawsuit-workflow-view")).toHaveTextContent(DEFAULT_PROJECT_ID);
+      expect(localStorage.getItem(taskViewStorageKey())).toBe("legal-workflows");
+    });
+
+    localStorage.removeItem("kb-dashboard-view-mode");
+    localStorage.removeItem(taskViewStorageKey());
+  });
+
   it("opens research view from overflow and persists view selection", async () => {
     localStorage.setItem("kb-dashboard-view-mode", "project");
     (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({

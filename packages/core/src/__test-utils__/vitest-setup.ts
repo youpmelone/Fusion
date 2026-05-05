@@ -56,6 +56,11 @@ process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
   return (originalEmitWarning as (...a: unknown[]) => void)(warning, ...args);
 }) as typeof process.emitWarning;
 
+// Keep worker process titles neutral. A local dashboard memory guard may look
+// for the word "vitest" in process command lines/titles when reclaiming memory;
+// these workers are active verification processes, not stale ones.
+process.title = "fusion-test-worker";
+
 const originalCwd = process.cwd.bind(process);
 
 function ensureValidCwd(): string {

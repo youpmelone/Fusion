@@ -153,6 +153,37 @@ Navigation:
 
 For the full research workflow, provider setup, CLI commands, API reference, and agent integration, see the canonical [Research guide](./research.md).
 
+## Counter-lawsuit Prototype Workflow View
+
+The Counter-lawsuit prototype view is a guarded dashboard entry point for starting a future legal workflow run.
+
+It defines the client-side launch contract only. Server orchestration for vault mining, legal research tools, red-team review, and artifact generation is follow-up API work.
+
+Navigation:
+- Desktop and tablet: **Header → More views → Counter-lawsuit prototype**
+- Mobile: **More** sheet in `MobileNavBar` → **Counter-lawsuit prototype**
+- The route is intentionally not shown in Header primary navigation or mobile primary tabs.
+
+Launch behavior:
+- Requires a matter or workflow name.
+- Accepts optional focus notes and an optional vault scope for mining context.
+- Sends requested artifact IDs and fixed safeguards to `POST /api/legal-workflows/counter-lawsuit/runs` with project scoping.
+- Shows validation, loading, friendly backend-missing errors, and queued run status when the API responds.
+
+Mandatory safety boundaries shown in the view:
+- Citation/source verification must remain enabled.
+- Opposing-counsel red-team review must remain enabled.
+- Source lineage preservation must remain enabled.
+- Human verification is required before use.
+
+Expected artifacts requested by the first prototype:
+- Claim and counterclaim map
+- Evidence and citation lineage packet
+- Opposing-counsel red-team memo
+- Draft response outline for attorney review
+
+Generated materials are not legal advice. They are unverified drafts and must be reviewed by a qualified human before filing, sending, or relying on them.
+
 ## Memory View
 
 Memory view provides a multi-file editor for project and daily memory files.

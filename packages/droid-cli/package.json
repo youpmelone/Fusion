@@ -34,7 +34,7 @@
     "vitest": "^3.0.0"
   },
   "scripts": {
-    "test": "vitest run --reporter=dot",
+    "test": "node ../../scripts/run-vt.mjs run --reporter=dot",
     "typecheck": "tsc --noEmit"
   }
 }

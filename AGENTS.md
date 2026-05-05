@@ -550,10 +550,10 @@ The test config (`vitest.config.ts`) includes `test.css: { include: [/.+/] }` so
 
 ### Lazy-Loaded Heavy Views
 
-These 15 views are lazy-loaded via `React.lazy()` to manage bundle size:
+These 16 views are lazy-loaded via `React.lazy()` to manage bundle size:
 
 - `AgentsView`, `RoadmapsView`, `NodesView`, `ChatView`, `MemoryView`
-- `DevServerView`, `InsightsView`, `DocumentsView`, `SkillsView`, `ResearchView`, `TodoView`
+- `DevServerView`, `InsightsView`, `DocumentsView`, `SkillsView`, `ResearchView`, `CounterLawsuitWorkflowView`, `TodoView`
 - `SetupWizardModal`, `PluginManager`, `PiExtensionsManager`, `AgentDetailView`
 
 They are loaded in `App.tsx` / `AppModals.tsx` / `SettingsModal.tsx` / `AgentsView.tsx` with `<Suspense fallback={null}>`. 

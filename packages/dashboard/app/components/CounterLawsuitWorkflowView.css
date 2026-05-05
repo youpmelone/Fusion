@@ -1,0 +1,222 @@
+.counter-lawsuit-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-lg);
+  padding-bottom: var(--space-lg);
+}
+
+.counter-lawsuit-view__hero,
+.counter-lawsuit-view__notice,
+.counter-lawsuit-view__panel,
+.counter-lawsuit-view__result,
+.counter-lawsuit-view__safety-card {
+  padding: var(--space-lg);
+}
+
+.counter-lawsuit-view__hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  cursor: default;
+}
+
+.counter-lawsuit-view__hero-copy,
+.counter-lawsuit-view__section-heading,
+.counter-lawsuit-view__notice div,
+.counter-lawsuit-view__safety-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.counter-lawsuit-view__eyebrow,
+.counter-lawsuit-view__subtitle,
+.counter-lawsuit-view__section-heading p,
+.counter-lawsuit-view__notice p,
+.counter-lawsuit-view__safety-card p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.counter-lawsuit-view__eyebrow {
+  color: var(--color-warning);
+  text-transform: uppercase;
+}
+
+.counter-lawsuit-view h1,
+.counter-lawsuit-view h2,
+.counter-lawsuit-view h3 {
+  margin: 0;
+}
+
+.counter-lawsuit-view__hero-badge,
+.counter-lawsuit-view__notice,
+.counter-lawsuit-view__safety-title-row,
+.counter-lawsuit-view__status-value,
+.counter-lawsuit-view__artifact-list li,
+.counter-lawsuit-view__returned-artifacts li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.counter-lawsuit-view__hero-badge {
+  flex-shrink: 0;
+  border: var(--btn-border-width) solid var(--color-warning);
+  border-radius: var(--radius-pill);
+  color: var(--color-warning);
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.counter-lawsuit-view__notice {
+  align-items: flex-start;
+  border-color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+}
+
+.counter-lawsuit-view__notice svg,
+.counter-lawsuit-view__spinner {
+  flex-shrink: 0;
+}
+
+.counter-lawsuit-view__notice svg {
+  color: var(--color-warning);
+}
+
+.counter-lawsuit-view__layout,
+.counter-lawsuit-view__safety-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+}
+
+.counter-lawsuit-view__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  cursor: default;
+}
+
+.counter-lawsuit-view__form,
+.counter-lawsuit-view__artifact-list,
+.counter-lawsuit-view__returned-artifacts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.counter-lawsuit-view__field.form-group {
+  margin: 0;
+  padding: 0;
+}
+
+.counter-lawsuit-view__textarea {
+  min-height: calc(var(--space-2xl) * 3);
+  resize: vertical;
+}
+
+.counter-lawsuit-view__api-error {
+  color: var(--color-error);
+}
+
+.counter-lawsuit-view__artifact-list,
+.counter-lawsuit-view__returned-artifacts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.counter-lawsuit-view__artifact-list svg {
+  color: var(--color-success);
+  flex-shrink: 0;
+}
+
+.counter-lawsuit-view__safety-grid {
+  align-items: stretch;
+}
+
+.counter-lawsuit-view__grid-title {
+  grid-column: 1 / -1;
+}
+
+.counter-lawsuit-view__safety-card {
+  cursor: default;
+}
+
+.counter-lawsuit-view__run-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-sm);
+  margin: 0;
+}
+
+.counter-lawsuit-view__run-meta div {
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: var(--space-sm);
+}
+
+.counter-lawsuit-view__run-meta dt {
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.counter-lawsuit-view__run-meta dd {
+  margin: var(--space-xs) 0 0;
+  font-family: var(--font-mono);
+}
+
+.counter-lawsuit-view__returned-artifacts li {
+  justify-content: space-between;
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+  background: var(--surface);
+}
+
+.counter-lawsuit-view__artifact-status {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+}
+
+@media (max-width: 768px) {
+  .counter-lawsuit-view {
+    padding: var(--space-md);
+    padding-bottom: calc(var(--space-md) + var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap));
+  }
+
+  .counter-lawsuit-view__hero,
+  .counter-lawsuit-view__notice,
+  .counter-lawsuit-view__panel,
+  .counter-lawsuit-view__result,
+  .counter-lawsuit-view__safety-card {
+    padding: var(--space-md);
+  }
+
+  .counter-lawsuit-view__hero,
+  .counter-lawsuit-view__notice {
+    flex-direction: column;
+  }
+
+  .counter-lawsuit-view__hero-badge {
+    align-self: flex-start;
+  }
+
+  .counter-lawsuit-view__layout,
+  .counter-lawsuit-view__safety-grid,
+  .counter-lawsuit-view__run-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .counter-lawsuit-view__returned-artifacts li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
