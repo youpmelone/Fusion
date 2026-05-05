@@ -32,6 +32,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Missions](./missions.md) | Mission hierarchy, planning flow, activation, progress tracking, and autopilot behavior |
 | [Research](./research.md) | Research runs, provider setup, dashboard/CLI usage, findings, exports, and task integration |
 | [Workflow Steps](./workflow-steps.md) | Reusable quality gates, templates, pre/post-merge phases, and workflow execution results |
+| [Legal Counter-Lawsuit Workflow](./legal-counter-lawsuit-workflow.md) | Counter-lawsuit prototype API orchestration, generated task graph, safety gates, and integration boundaries |
 | [Multi-Project](./multi-project.md) | Central registry architecture, project management, isolation modes, and migration paths |
 
 ### Configuration & Agents

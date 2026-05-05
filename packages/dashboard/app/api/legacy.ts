@@ -8346,8 +8346,11 @@ export interface StartCounterLawsuitPrototypeWorkflowInput {
   matterName: string;
   focus?: string;
   vaultScope?: string;
+  sourceScope?: string;
+  sourceQuery?: string;
   requestedArtifacts: string[];
   safeguards: CounterLawsuitWorkflowSafeguards;
+  codexSkillNames?: string[];
 }
 
 export type CounterLawsuitWorkflowRunStatus = "queued" | "starting" | "running" | "completed" | "failed";
@@ -8357,14 +8360,49 @@ export interface CounterLawsuitWorkflowArtifact {
   id: string;
   label: string;
   status: CounterLawsuitWorkflowArtifactStatus;
+  documentKey?: string;
+  taskId?: string;
+}
+
+export interface CounterLawsuitWorkflowStageTask {
+  id: string;
+  title?: string;
+  stage: string;
+  stageIndex: number;
+  expectedArtifact: string;
+  documentKey: string;
+  status: string;
+  dependencies: string[];
+  assignedAgentId?: string;
 }
 
 export interface StartCounterLawsuitPrototypeWorkflowResponse {
   runId: string;
   status: CounterLawsuitWorkflowRunStatus;
   taskId?: string;
+  task?: Task;
+  documentKey?: string;
   message?: string;
   artifacts: CounterLawsuitWorkflowArtifact[];
+  stageTasks?: CounterLawsuitWorkflowStageTask[];
+  workflowStepIds?: string[];
+  agentIds?: string[];
+  artifactKeys?: string[];
+  safetyGates?: string[];
+  sourceScopeStatus?: "specified" | "unspecified";
+  codexSkillNames?: string[];
+  codexSkillSource?: "default" | "user";
+}
+
+export interface CounterLawsuitWorkflowRunStatusResponse {
+  runId: string;
+  status: CounterLawsuitWorkflowRunStatus;
+  stageTasks: CounterLawsuitWorkflowStageTask[];
+  artifacts: CounterLawsuitWorkflowArtifact[];
+  artifactKeys: string[];
+  safetyGates: string[];
+  sourceScopeStatus: "specified" | "unspecified";
+  lineageDocuments: Array<{ taskId: string; documentKey: string; stage: string }>;
 }
 
 export function startCounterLawsuitPrototypeWorkflow(
@@ -8377,6 +8415,15 @@ export function startCounterLawsuitPrototypeWorkflow(
       method: "POST",
       body: JSON.stringify(input),
     },
+  );
+}
+
+export function fetchCounterLawsuitPrototypeWorkflowRunStatus(
+  runId: string,
+  projectId?: string,
+): Promise<CounterLawsuitWorkflowRunStatusResponse> {
+  return api<CounterLawsuitWorkflowRunStatusResponse>(
+    withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}`, projectId),
   );
 }
 

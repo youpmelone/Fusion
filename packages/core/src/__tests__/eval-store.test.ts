@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDatabase, type Database } from "../db.js";
 import { EvalLifecycleError, EvalStore } from "../eval-store.js";
 
@@ -13,11 +13,18 @@ beforeEach(() => {
 
 describe("EvalStore", () => {
   it("creates and lists runs with deterministic ordering", () => {
-    const runA = store.createRun({ projectId: "p1", scope: "completed-since-last", requestedTaskIds: ["FN-1"] });
-    const runB = store.createRun({ projectId: "p1", scope: "completed-since-last", requestedTaskIds: ["FN-2"] });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-05T00:00:00.000Z"));
 
-    const runs = store.listRuns({ projectId: "p1" });
-    expect(runs.map((run) => run.id)).toEqual([runA.id, runB.id].sort());
+    try {
+      const runA = store.createRun({ projectId: "p1", scope: "completed-since-last", requestedTaskIds: ["FN-1"] });
+      const runB = store.createRun({ projectId: "p1", scope: "completed-since-last", requestedTaskIds: ["FN-2"] });
+
+      const runs = store.listRuns({ projectId: "p1" });
+      expect(runs.map((run) => run.id)).toEqual([runA.id, runB.id].sort());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("enforces active run conflict for scheduled trigger", () => {
