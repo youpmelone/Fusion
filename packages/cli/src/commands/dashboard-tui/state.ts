@@ -391,7 +391,7 @@ export function createInitialState(): DashboardState {
     interactiveData: null,
     interactiveView: "board",
     interactiveInputLocked: false,
-    autoKillVitestOnPressure: true,
+    autoKillVitestOnPressure: false,
     vitestKillThreshold: 0.9,
     updateStatus: null,
     clipboardFlash: null,

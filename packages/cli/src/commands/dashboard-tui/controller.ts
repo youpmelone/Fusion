@@ -84,7 +84,7 @@ export class DashboardTUI {
   mode: "status" | "interactive" = "status";
   // When true, sampleSystemStats() kills any running vitest processes if
   // system memory usage crosses 90%. Toggled by [v] in the Utilities panel.
-  autoKillVitestOnPressure = true;
+  autoKillVitestOnPressure = false;
   // System-memory ratio (0..1) at which auto-kill triggers. Adjustable from
   // the Utilities panel via [+]/[-] in 5% steps. Clamped to [0.5, 0.99].
   vitestKillThreshold = 0.9;

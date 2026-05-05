@@ -1231,7 +1231,7 @@ export function __setCreateFnAgent(mock: typeof createFnAgent): void {
   // hit the real engine. Mirror the same fake into the resolved-session slot
   // so existing test setups that only call `__setCreateFnAgent` continue to
   // work.
-  createResolvedAgentSession = (async (options: any) => mock(options)) as typeof createResolvedAgentSession;
+  createResolvedAgentSession = (async (options: Parameters<typeof engineCreateFnAgent>[0]) => mock(options)) as typeof createResolvedAgentSession;
 }
 
 /**

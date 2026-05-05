@@ -24,6 +24,7 @@ import {
   Monitor,
   Network,
   Search,
+  Scale,
   Sparkles,
   Target,
   Terminal,
@@ -240,6 +241,7 @@ export function MobileNavBar({
   const isMoreActive =
     view === "documents"
     || view === "research"
+    || view === "legal-workflows"
     || view === "insights"
     || view === "memory"
     || view === "devserver"
@@ -644,6 +646,16 @@ export function MobileNavBar({
                 <span>Research</span>
               </button>
             )}
+
+            <button
+              type="button"
+              className="mobile-more-item"
+              data-testid="mobile-more-item-legal-workflows"
+              onClick={() => handleMoreAction(() => onChangeView("legal-workflows"))}
+            >
+              <Scale />
+              <span>Counter-lawsuit prototype</span>
+            </button>
 
             {experimentalFeatures?.insights && (
               <button

@@ -79,6 +79,7 @@ const AgentsView = lazy(() => import("./components/AgentsView").then((m) => ({ d
 const DocumentsView = lazy(() => import("./components/DocumentsView").then((m) => ({ default: m.DocumentsView })));
 const InsightsView = lazy(() => import("./components/InsightsView").then((m) => ({ default: m.InsightsView })));
 const ResearchView = lazy(() => import("./components/ResearchView").then((m) => ({ default: m.ResearchView })));
+const CounterLawsuitWorkflowView = lazy(() => import("./components/CounterLawsuitWorkflowView").then((m) => ({ default: m.CounterLawsuitWorkflowView })));
 const NodesView = lazy(() => import("./components/NodesView").then((m) => ({ default: m.NodesView })));
 const ChatView = lazy(() => import("./components/ChatView").then((m) => ({ default: m.ChatView })));
 const RoadmapsView = lazy(() => import("./components/RoadmapsView").then((m) => ({ default: m.RoadmapsView })));
@@ -103,6 +104,7 @@ function prefetchLazyViews() {
     void import("./components/DocumentsView");
     void import("./components/InsightsView");
     void import("./components/ResearchView");
+    void import("./components/CounterLawsuitWorkflowView");
     void import("./components/NodesView");
     void import("./components/ChatView");
     void import("./components/RoadmapsView");
@@ -1045,6 +1047,16 @@ function AppInner() {
         <PageErrorBoundary>
           <Suspense fallback={null}>
             <MemoryView addToast={addToast} projectId={currentProject?.id} />
+          </Suspense>
+        </PageErrorBoundary>
+      );
+    }
+
+    if (taskView === "legal-workflows") {
+      return (
+        <PageErrorBoundary>
+          <Suspense fallback={null}>
+            <CounterLawsuitWorkflowView addToast={addToast} projectId={currentProject?.id} />
           </Suspense>
         </PageErrorBoundary>
       );

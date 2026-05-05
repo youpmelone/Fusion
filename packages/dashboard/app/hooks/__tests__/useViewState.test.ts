@@ -248,6 +248,22 @@ describe("useViewState", () => {
     });
   });
 
+  it("reads saved legal workflows taskView from scoped localStorage on init", async () => {
+    localStorage.setItem("kb:proj_123:kb-dashboard-task-view", "legal-workflows");
+
+    const { result } = renderHook(() =>
+      useViewState(
+        createOptions({
+          currentProject: PROJECT,
+        }),
+      ),
+    );
+
+    await waitFor(() => {
+      expect(result.current.taskView).toBe("legal-workflows");
+    });
+  });
+
   it("persists insights taskView changes to scoped localStorage", async () => {
     const { result } = renderHook(() =>
       useViewState(
@@ -278,6 +294,22 @@ describe("useViewState", () => {
     });
 
     expect(localStorage.getItem("kb:proj_123:kb-dashboard-task-view")).toBe("research");
+  });
+
+  it("persists legal workflows taskView changes to scoped localStorage", async () => {
+    const { result } = renderHook(() =>
+      useViewState(
+        createOptions({
+          currentProject: PROJECT,
+        }),
+      ),
+    );
+
+    await act(async () => {
+      result.current.setTaskView("legal-workflows");
+    });
+
+    expect(localStorage.getItem("kb:proj_123:kb-dashboard-task-view")).toBe("legal-workflows");
   });
 
   it("restores dev-server task view and normalizes legacy devserver values", async () => {

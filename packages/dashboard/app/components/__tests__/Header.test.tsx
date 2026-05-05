@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { Header } from "../Header";
 
@@ -234,6 +234,26 @@ describe("Header", () => {
 
       expect(onChangeView).toHaveBeenCalledWith("research");
       expect(screen.queryByTestId("view-overflow-research")).toBeNull();
+    });
+
+    it("routes to legal workflows from the desktop view overflow without adding a primary tab", () => {
+      const onChangeView = vi.fn();
+      renderHeader({ onChangeView, view: "board" });
+
+      expect(screen.queryByRole("button", { name: "Counter-lawsuit prototype" })).toBeNull();
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      fireEvent.click(screen.getByTestId("view-overflow-legal-workflows"));
+
+      expect(onChangeView).toHaveBeenCalledWith("legal-workflows");
+      expect(screen.queryByTestId("view-overflow-legal-workflows")).toBeNull();
+    });
+
+    it("marks the desktop view overflow trigger active for legal workflows", () => {
+      renderHeader({ onChangeView: noop, view: "legal-workflows" });
+
+      expect(screen.getByTestId("view-toggle-overflow-trigger").className).toContain("active");
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      expect(screen.getByTestId("view-overflow-legal-workflows").className).toContain("active");
     });
   });
 

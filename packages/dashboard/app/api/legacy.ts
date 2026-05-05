@@ -8333,6 +8333,53 @@ export function getInsightCreateTaskData(
   });
 }
 
+// ── Legal Workflow API ──────────────────────────────────────────────────────
+
+export interface CounterLawsuitWorkflowSafeguards {
+  citationSourceVerification: true;
+  opposingCounselRedTeam: true;
+  preserveLineage: true;
+  humanVerificationRequired: true;
+}
+
+export interface StartCounterLawsuitPrototypeWorkflowInput {
+  matterName: string;
+  focus?: string;
+  vaultScope?: string;
+  requestedArtifacts: string[];
+  safeguards: CounterLawsuitWorkflowSafeguards;
+}
+
+export type CounterLawsuitWorkflowRunStatus = "queued" | "starting" | "running" | "completed" | "failed";
+export type CounterLawsuitWorkflowArtifactStatus = "queued" | "pending" | "generating" | "ready" | "failed";
+
+export interface CounterLawsuitWorkflowArtifact {
+  id: string;
+  label: string;
+  status: CounterLawsuitWorkflowArtifactStatus;
+}
+
+export interface StartCounterLawsuitPrototypeWorkflowResponse {
+  runId: string;
+  status: CounterLawsuitWorkflowRunStatus;
+  taskId?: string;
+  message?: string;
+  artifacts: CounterLawsuitWorkflowArtifact[];
+}
+
+export function startCounterLawsuitPrototypeWorkflow(
+  input: StartCounterLawsuitPrototypeWorkflowInput,
+  projectId?: string,
+): Promise<StartCounterLawsuitPrototypeWorkflowResponse> {
+  return api<StartCounterLawsuitPrototypeWorkflowResponse>(
+    withProjectId("/legal-workflows/counter-lawsuit/runs", projectId),
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
 // ── Research API ────────────────────────────────────────────────────────────
 
 export interface CreateResearchRunInput {

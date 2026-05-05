@@ -344,6 +344,7 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-more-item-github")).toBeDefined();
     expect(screen.getByTestId("mobile-more-item-usage")).toBeDefined();
     expect(screen.getByTestId("mobile-more-item-projects")).toBeDefined();
+    expect(screen.getByTestId("mobile-more-item-legal-workflows")).toBeDefined();
     expect(screen.queryByTestId("mobile-more-item-chat")).toBeNull();
     expect(screen.queryByTestId("mobile-more-item-roadmaps")).toBeNull();
     expect(screen.queryByTestId("mobile-more-item-insights")).toBeNull();
@@ -448,6 +449,24 @@ describe("MobileNavBar", () => {
 
     expect(container.querySelector(".mobile-more-sheet")).toBeNull();
     expect(props.onChangeView).toHaveBeenCalledWith("research");
+  });
+
+  it("legal workflows appears only in the more sheet and calls onChangeView", () => {
+    const props = createDefaultProps();
+    const { container } = render(<MobileNavBar {...props} view="board" />);
+
+    expect(screen.queryByTestId("mobile-nav-tab-legal-workflows")).toBeNull();
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    fireEvent.click(screen.getByTestId("mobile-more-item-legal-workflows"));
+
+    expect(container.querySelector(".mobile-more-sheet")).toBeNull();
+    expect(props.onChangeView).toHaveBeenCalledWith("legal-workflows");
+  });
+
+  it("marks the more tab active for legal workflows", () => {
+    render(<MobileNavBar {...createDefaultProps()} view="legal-workflows" />);
+
+    expect(screen.getByTestId("mobile-nav-tab-more").className).toContain("mobile-nav-tab--active");
   });
 
   it("activity log item in more sheet calls onOpenActivityLog", () => {

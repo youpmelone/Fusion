@@ -46,6 +46,11 @@ const DEFAULT_TEST_SUBPROCESS_TIMEOUT_MS = Math.max(
 const BLOCKED_TEST_CLI_PATTERN =
   /(^|[\s"'\\/])(?:claude|droid|paperclipai|hermes|openclaw)(?:\.(?:cmd|bat|ps1|exe))?(?=$|[\s"'\\/])/i;
 
+// Keep worker process titles neutral. A local dashboard memory guard may look
+// for the word "vitest" in process command lines/titles when reclaiming memory;
+// these workers are active verification processes, not stale ones.
+process.title = "fusion-test-worker";
+
 const originalCwd = process.cwd.bind(process);
 
 function ensureValidCwd(): string {

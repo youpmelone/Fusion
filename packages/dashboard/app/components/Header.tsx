@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { Settings, Pause, Play, Square, LayoutGrid, List, Terminal, Lightbulb, Search, X, Activity, MoreHorizontal, Clock, Folder, History, GitBranch, Monitor, Server, Workflow, Bot, Target, ChevronRight, FileCode, Loader2, Grid3X3, Mail, MessageSquare, ChevronDown, Check, Zap, Sparkles, FileText, Brain, CheckSquare } from "lucide-react";
+import { Settings, Pause, Play, Square, LayoutGrid, List, Terminal, Lightbulb, Search, X, Activity, MoreHorizontal, Clock, Folder, History, GitBranch, Monitor, Server, Workflow, Bot, Target, ChevronRight, FileCode, Loader2, Grid3X3, Mail, MessageSquare, ChevronDown, Check, Zap, Sparkles, FileText, Brain, CheckSquare, Scale } from "lucide-react";
 import "./Header.css";
 // Header renders an inline ProjectSelector dropdown using project-selector-* classes.
 import "./ProjectSelector.css";
@@ -345,8 +345,10 @@ export function Header({
     [pluginDashboardViews],
   );
 
+  const legalWorkflowsViewEnabled = Boolean(onChangeView);
   const hasViewOverflowItems = useMemo(() => {
     return !!(
+      legalWorkflowsViewEnabled ||
       experimentalFeatures?.researchView ||
       todosEnabled ||
       experimentalFeatures?.insights ||
@@ -357,7 +359,7 @@ export function Header({
       !hideFullNav ||
       pluginDashboardViews.some((entry) => entry.view.placement !== "primary")
     );
-  }, [experimentalFeatures, todosEnabled, showSkillsTab, hideFullNav, pluginDashboardViews, hasRoadmapsPluginView]);
+  }, [experimentalFeatures, todosEnabled, showSkillsTab, hideFullNav, pluginDashboardViews, hasRoadmapsPluginView, legalWorkflowsViewEnabled]);
 
   const getEffectiveViewport = useCallback(() => {
     const vv = window.visualViewport;
@@ -1152,7 +1154,7 @@ export function Header({
               <>
                 <button
                   ref={viewOverflowTriggerRef}
-                  className={`view-toggle-btn${["research", "skills", "roadmaps", "insights", "memory", "dev-server", "devserver"].includes(view) || (todosEnabled && todosOpen) || view.startsWith("plugin:") ? " active" : ""}`}
+                  className={`view-toggle-btn${["research", "legal-workflows", "skills", "roadmaps", "insights", "memory", "dev-server", "devserver"].includes(view) || (todosEnabled && todosOpen) || view.startsWith("plugin:") ? " active" : ""}`}
                   onClick={() => setIsViewOverflowOpen((prev) => !prev)}
                   title="More views"
                   aria-label="More views"
@@ -1183,6 +1185,18 @@ export function Header({
                         <span>Research</span>
                       </button>
                     )}
+                    <button
+                      className={`view-toggle-overflow-item${view === "legal-workflows" ? " active" : ""}`}
+                      onClick={() => {
+                        onChangeView("legal-workflows");
+                        setIsViewOverflowOpen(false);
+                      }}
+                      role="menuitem"
+                      data-testid="view-overflow-legal-workflows"
+                    >
+                      <Scale size={14} />
+                      <span>Counter-lawsuit prototype</span>
+                    </button>
                     {experimentalFeatures?.insights && (
                       <button
                         className={`view-toggle-overflow-item${view === "insights" ? " active" : ""}`}

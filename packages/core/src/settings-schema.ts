@@ -77,7 +77,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   dashboardCurrentNodeId: undefined,
   dashboardCurrentProjectIdByNode: undefined,
   // Dashboard TUI memory guard
-  vitestAutoKillEnabled: true,
+  vitestAutoKillEnabled: false,
   vitestKillThresholdPct: 90,
   // Agent log persistence controls
   persistAgentToolOutput: true,

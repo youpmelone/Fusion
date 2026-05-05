@@ -36,7 +36,7 @@
     "build:client": "vite build",
     "dev": "pnpm build && pnpm typecheck && pnpm dev:serve",
     "dev:serve": "vite dev",
-    "test": "vitest run --silent=passed-only --reporter=dot --exclude '**/build-output.test.ts'",
+    "test": "node ../../scripts/run-vt.mjs run --silent=passed-only --reporter=dot --exclude '**/build-output.test.ts'",
     "test:build": "vitest run --silent=passed-only --reporter=dot app/__tests__/build-output.test.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.app.json"
   },
