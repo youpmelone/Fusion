@@ -220,7 +220,7 @@ describe("vault mining receipt normalization", () => {
       retrievedAt: "2026-05-05T00:00:00.000Z",
       rawResult: {
         results: [
-          { path: "client/acme/timeline.md", lineStart: 10, lineEnd: 12, title: "Timeline", content: "Retaliatory filing note with sk-secret-token-value-that-must-go" },
+          { path: "client/acme/timeline.md", lineStart: 10, lineEnd: 12, title: "Timeline", content: "Retaliatory filing note with Authorization: Bearer abcdefghijklmnop and token: qrstuvwxyz123456" },
         ],
       },
     });
@@ -238,7 +238,8 @@ describe("vault mining receipt normalization", () => {
       lineEnd: 12,
       verified: false,
     });
-    expect(normalized.receipts[0].excerpt).not.toContain("sk-secret");
+    expect(normalized.receipts[0].excerpt).not.toContain("Authorization: Bearer abcdefghijklmnop");
+    expect(normalized.receipts[0].excerpt).not.toContain("token: qrstuvwxyz123456");
     expect(normalized.receipts[0].hash).toMatch(/^[a-f0-9]{64}$/);
     expect(normalized.receipts[0].receiptId).toMatch(/^LVR-/);
   });
@@ -269,7 +270,7 @@ describe("vault mining receipt normalization", () => {
       toolName: "search",
       query: "Acme",
       rawResult: [
-        { title: "No path", excerpt: "missing path" },
+        { title: "No path", excerpt: "missing path Authorization: Bearer abcdefghijklmnop" },
         { path: "note.md", excerpt: "same" },
         { path: "note.md", excerpt: "same" },
       ],
@@ -277,6 +278,7 @@ describe("vault mining receipt normalization", () => {
     expect(normalized.receipts).toHaveLength(1);
     expect(normalized.rejectedHits).toHaveLength(1);
     expect(normalized.rejectedHits[0].reason).toBe("missing sourcePath");
+    expect(JSON.stringify(normalized.rejectedHits)).not.toContain("Authorization: Bearer abcdefghijklmnop");
   });
 
   it("bounds query and max-result inputs", () => {
@@ -290,7 +292,7 @@ describe("vault mining receipt normalization", () => {
 describe("mineCounterLawsuitVaultSources", () => {
   it("persists accepted receipts to ResearchStore and research-memo task documents", async () => {
     const taskStore = new FakeTaskStore();
-    const qmdClient = new FakeMcpClient("qmd-mcp", [{ name: "qmd.search" }], [{ sourcePath: "vault/qmd.md", excerpt: "qmd excerpt" }]);
+    const qmdClient = new FakeMcpClient("qmd-mcp", [{ name: "qmd.search" }], [{ sourcePath: "vault/qmd.md", excerpt: "qmd excerpt Authorization: Bearer abcdefghijklmnop" }]);
     const obsidianClient = new FakeMcpClient("obsidian-vault", [{ name: "obsidian.search" }], [{ path: "vault/obsidian.md", content: "obsidian excerpt" }]);
     const result = await mineCounterLawsuitVaultSources({
       taskStore: taskStore as never,
@@ -309,13 +311,16 @@ describe("mineCounterLawsuitVaultSources", () => {
     expect(taskStore.researchStore.runs).toHaveLength(1);
     const sources = taskStore.researchStore.runs[0].sources as ResearchSource[];
     expect(sources.map((source) => source.reference)).toEqual(["vault/qmd.md", "vault/obsidian.md"]);
-    expect(JSON.stringify(sources)).not.toContain("secret");
+    expect(JSON.stringify(sources)).not.toContain("Authorization: Bearer abcdefghijklmnop");
+    expect(JSON.stringify(sources)).not.toContain("token: qrstuvwxyz123456");
 
     const receiptsDoc = await taskStore.getTaskDocument("FN-1", VAULT_MINING_RECEIPTS_DOCUMENT_KEY);
     const statusDoc = await taskStore.getTaskDocument("FN-1", VAULT_MINING_STATUS_DOCUMENT_KEY);
     expect(receiptsDoc?.content).toContain("not legally verified");
     expect(receiptsDoc?.content).toContain("vault/qmd.md");
     expect(receiptsDoc?.metadata?.researchRunId).toBe("RR-1");
+    expect(receiptsDoc?.content).not.toContain("Authorization: Bearer abcdefghijklmnop");
+    expect(JSON.stringify(receiptsDoc?.metadata)).not.toContain("Authorization: Bearer abcdefghijklmnop");
     expect(statusDoc?.content).toContain("Vault mining status");
     expect((await taskStore.getTaskDocument("FN-1", "counter-lawsuit-stage"))?.content).toContain("vault-mining-receipts");
   });
@@ -407,7 +412,7 @@ describe("mineCounterLawsuitVaultSources", () => {
   it("redacts token-like values from persisted provider error diagnostics", async () => {
     class SecretFailingClient extends FakeMcpClient {
       override async callTool(): Promise<unknown> {
-        throw new Error("provider failed with sk-secret-token-value-that-must-go");
+        throw new Error("provider failed with Authorization: Bearer abcdefghijklmnop and token: qrstuvwxyz123456");
       }
     }
     const taskStore = new FakeTaskStore();
@@ -421,8 +426,9 @@ describe("mineCounterLawsuitVaultSources", () => {
       searchProjectMemoryFn: async () => [],
     });
 
-    expect(JSON.stringify(result.providerDiagnostics)).not.toContain("sk-secret");
-    expect(JSON.stringify(taskStore.researchStore.runs[0].metadata)).not.toContain("sk-secret");
+    expect(JSON.stringify(result.providerDiagnostics)).not.toContain("Authorization: Bearer abcdefghijklmnop");
+    expect(JSON.stringify(result.providerDiagnostics)).not.toContain("token: qrstuvwxyz123456");
+    expect(JSON.stringify(taskStore.researchStore.runs[0].metadata)).not.toContain("Authorization: Bearer abcdefghijklmnop");
   });
 
   it("derives persisted vault-mining status from deterministic task documents", async () => {

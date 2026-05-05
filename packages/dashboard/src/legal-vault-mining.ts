@@ -129,7 +129,8 @@ const DEFAULT_MAX_QUERIES = 6;
 const DEFAULT_MAX_RESULTS_PER_PROVIDER = 8;
 const HARD_MAX_QUERIES = 10;
 const HARD_MAX_RESULTS_PER_PROVIDER = 20;
-const TOKEN_RE = /(?:sk|pk|ghp|github_pat|obsidian|bearer|token|secret|api[_-]?key)[A-Za-z0-9_:\-.=+/]{8,}/gi;
+const TOKEN_RE = /authorization\s*:\s*bearer\s+\S+|bearer\s+\S{8,}|(?:token|secret|api[_-]?key|password|credential|auth)\s*[:=]\s*\S{8,}|(?:sk|pk|ghp|github_pat|obsidian)[A-Za-z0-9_:\-.=+/]{8,}/gi;
+const TOKEN_KEY_RE = /(?:token|secret|api[_-]?key|password|credential|auth)/i;
 
 function redactSecrets(value: string): string {
   return value.replace(TOKEN_RE, "[REDACTED]");
@@ -152,7 +153,7 @@ function rawSummary(raw: unknown): string {
   if (Array.isArray(raw)) return `array(${raw.length})`;
   if (!raw || typeof raw !== "object") return boundedText(String(raw), MAX_SUMMARY_CHARS) ?? "primitive";
   const record = raw as Record<string, unknown>;
-  const keys = Object.keys(record).filter((key) => !TOKEN_RE.test(key)).slice(0, 8);
+  const keys = Object.keys(record).filter((key) => !TOKEN_KEY_RE.test(key)).slice(0, 8);
   const count = Array.isArray(record.results) ? record.results.length
     : Array.isArray(record.matches) ? record.matches.length
       : Array.isArray(record.items) ? record.items.length
