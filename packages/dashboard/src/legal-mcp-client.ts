@@ -305,7 +305,7 @@ export class StdioLegalMcpClient implements LegalMcpClient {
     readonly serverName: string,
     private readonly config: LegalMcpServerConfig,
     private readonly cwd: string,
-    private readonly provider?: LegalMcpProviderName,
+    private readonly provider: LegalMcpProviderName,
   ) {}
 
   private async ensureConnection(timeoutMs: number): Promise<JsonRpcStdioConnection> {
@@ -316,6 +316,7 @@ export class StdioLegalMcpClient implements LegalMcpClient {
         shell: false,
         stdio: "pipe",
       });
+      child.stderr.on("data", () => undefined);
       this.connection = new JsonRpcStdioConnection(child);
     }
     if (!this.initialized) {
@@ -345,9 +346,7 @@ export class StdioLegalMcpClient implements LegalMcpClient {
   }
 
   async callTool(name: string, input: Record<string, unknown>, timeoutMs = DEFAULT_MCP_TIMEOUT_MS): Promise<unknown> {
-    if (this.provider) {
-      assertAllowedLegalMcpTool(this.provider, name);
-    }
+    assertAllowedLegalMcpTool(this.provider, name);
     const connection = await this.ensureConnection(timeoutMs);
     return connection.request("tools/call", { name, arguments: input }, timeoutMs);
   }

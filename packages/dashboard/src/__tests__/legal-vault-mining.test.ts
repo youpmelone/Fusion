@@ -220,7 +220,7 @@ describe("vault mining receipt normalization", () => {
       retrievedAt: "2026-05-05T00:00:00.000Z",
       rawResult: {
         results: [
-          { path: "client/acme/timeline.md", lineStart: 10, lineEnd: 12, title: "Timeline", content: "Retaliatory filing note with Authorization: Bearer abcdefghijklmnop and token: qrstuvwxyz123456" },
+          { path: "client/acme/timeline.md", lineStart: 10, lineEnd: 12, title: "Timeline", content: "Retaliatory filing note with Authorization: Bearer abcdefghijklmnop and token: qrstuvwxyz123456 and {\"api_key\":\"quotedsecret123456\",\"password\":\"passwordsecret123456\",\"secret\":\"secretvalue123456\"}" },
         ],
       },
     });
@@ -240,6 +240,9 @@ describe("vault mining receipt normalization", () => {
     });
     expect(normalized.receipts[0].excerpt).not.toContain("Authorization: Bearer abcdefghijklmnop");
     expect(normalized.receipts[0].excerpt).not.toContain("token: qrstuvwxyz123456");
+    expect(normalized.receipts[0].excerpt).not.toContain("quotedsecret123456");
+    expect(normalized.receipts[0].excerpt).not.toContain("passwordsecret123456");
+    expect(normalized.receipts[0].excerpt).not.toContain("secretvalue123456");
     expect(normalized.receipts[0].hash).toMatch(/^[a-f0-9]{64}$/);
     expect(normalized.receipts[0].receiptId).toMatch(/^LVR-/);
   });
@@ -270,7 +273,7 @@ describe("vault mining receipt normalization", () => {
       toolName: "search",
       query: "Acme",
       rawResult: [
-        { title: "No path", excerpt: "missing path Authorization: Bearer abcdefghijklmnop" },
+        { title: "No path", excerpt: "missing path Authorization: Bearer abcdefghijklmnop and \"token\": \"qrstuvwxyz123456\"" },
         { path: "note.md", excerpt: "same" },
         { path: "note.md", excerpt: "same" },
       ],
@@ -292,7 +295,7 @@ describe("vault mining receipt normalization", () => {
 describe("mineCounterLawsuitVaultSources", () => {
   it("persists accepted receipts to ResearchStore and research-memo task documents", async () => {
     const taskStore = new FakeTaskStore();
-    const qmdClient = new FakeMcpClient("qmd-mcp", [{ name: "qmd.search" }], [{ sourcePath: "vault/qmd.md", excerpt: "qmd excerpt Authorization: Bearer abcdefghijklmnop" }]);
+    const qmdClient = new FakeMcpClient("qmd-mcp", [{ name: "qmd.search" }], [{ sourcePath: "vault/qmd.md", excerpt: "qmd excerpt Authorization: Bearer abcdefghijklmnop and {\"api_key\":\"quotedsecret123456\",\"password\":\"passwordsecret123456\",\"secret\":\"secretvalue123456\"}" }]);
     const obsidianClient = new FakeMcpClient("obsidian-vault", [{ name: "obsidian.search" }], [{ path: "vault/obsidian.md", content: "obsidian excerpt" }]);
     const result = await mineCounterLawsuitVaultSources({
       taskStore: taskStore as never,
@@ -313,6 +316,9 @@ describe("mineCounterLawsuitVaultSources", () => {
     expect(sources.map((source) => source.reference)).toEqual(["vault/qmd.md", "vault/obsidian.md"]);
     expect(JSON.stringify(sources)).not.toContain("Authorization: Bearer abcdefghijklmnop");
     expect(JSON.stringify(sources)).not.toContain("token: qrstuvwxyz123456");
+    expect(JSON.stringify(sources)).not.toContain("quotedsecret123456");
+    expect(JSON.stringify(sources)).not.toContain("passwordsecret123456");
+    expect(JSON.stringify(sources)).not.toContain("secretvalue123456");
 
     const receiptsDoc = await taskStore.getTaskDocument("FN-1", VAULT_MINING_RECEIPTS_DOCUMENT_KEY);
     const statusDoc = await taskStore.getTaskDocument("FN-1", VAULT_MINING_STATUS_DOCUMENT_KEY);
@@ -321,6 +327,7 @@ describe("mineCounterLawsuitVaultSources", () => {
     expect(receiptsDoc?.metadata?.researchRunId).toBe("RR-1");
     expect(receiptsDoc?.content).not.toContain("Authorization: Bearer abcdefghijklmnop");
     expect(JSON.stringify(receiptsDoc?.metadata)).not.toContain("Authorization: Bearer abcdefghijklmnop");
+    expect(JSON.stringify(receiptsDoc?.metadata)).not.toContain("quotedsecret123456");
     expect(statusDoc?.content).toContain("Vault mining status");
     expect((await taskStore.getTaskDocument("FN-1", "counter-lawsuit-stage"))?.content).toContain("vault-mining-receipts");
   });

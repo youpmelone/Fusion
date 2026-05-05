@@ -129,7 +129,7 @@ const DEFAULT_MAX_QUERIES = 6;
 const DEFAULT_MAX_RESULTS_PER_PROVIDER = 8;
 const HARD_MAX_QUERIES = 10;
 const HARD_MAX_RESULTS_PER_PROVIDER = 20;
-const TOKEN_RE = /authorization\s*:\s*bearer\s+\S+|bearer\s+\S{8,}|(?:token|secret|api[_-]?key|password|credential|auth)\s*[:=]\s*\S{8,}|(?:sk|pk|ghp|github_pat|obsidian)[A-Za-z0-9_:\-.=+/]{8,}/gi;
+const TOKEN_RE = /["']?(?:authorization)["']?\s*[:=]\s*["']?bearer\s+[^"'\s,}]{8,}["']?|["']?(?:token|secret|api[_-]?key|password|credential|auth)["']?\s*[:=]\s*["']?[^"'\s,}]{8,}["']?|bearer\s+\S{8,}|(?:sk|pk|ghp|github_pat|obsidian)[A-Za-z0-9_:\-.=+/]{8,}/gi;
 const TOKEN_KEY_RE = /(?:token|secret|api[_-]?key|password|credential|auth)/i;
 
 function redactSecrets(value: string): string {
