@@ -351,8 +351,12 @@ export function validateVaultMiningOverrides(overrides: unknown): VaultMiningPro
     const serverName = typeof record.serverName === "string" ? record.serverName.trim() : undefined;
     const searchToolName = typeof record.searchToolName === "string" ? record.searchToolName.trim() : undefined;
     const readToolName = typeof record.readToolName === "string" ? record.readToolName.trim() : undefined;
-    if (searchToolName) assertAllowedLegalMcpTool(provider, searchToolName);
-    if (provider === "obsidian" && readToolName) assertAllowedLegalMcpTool(provider, readToolName);
+    try {
+      if (searchToolName) assertAllowedLegalMcpTool(provider, searchToolName);
+      if (provider === "obsidian" && readToolName) assertAllowedLegalMcpTool(provider, readToolName);
+    } catch (error) {
+      throw badRequest(error instanceof Error ? error.message : String(error));
+    }
     output[provider] = {
       ...(serverName ? { serverName } : {}),
       ...(searchToolName ? { searchToolName } : {}),

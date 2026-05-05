@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import express from "express";
 import { describe, expect, it } from "vitest";
 import { AgentStore, TaskStore } from "@fusion/core";
-import type { Agent, Task, WorkflowStep } from "@fusion/core";
+import type { Agent, ResearchRun, Task, TaskDocument, WorkflowStep } from "@fusion/core";
+import type { LegalMcpClient, LegalMcpTool } from "../legal-mcp-client.js";
 import { ApiError, sendErrorResponse } from "../api-error.js";
 import { registerLegalWorkflowRoutes } from "../routes/register-legal-workflow-routes.js";
 import type { ApiRoutesContext } from "../routes/types.js";
@@ -41,10 +42,40 @@ function makeTask(input: Partial<Task> & { id: string; description: string }): T
   };
 }
 
+class FakeResearchStore {
+  runs: ResearchRun[] = [];
+
+  createRun(input: any): ResearchRun {
+    const run = {
+      id: `RR-${this.runs.length + 1}`,
+      query: input.query,
+      topic: input.topic,
+      status: "queued",
+      trigger: input.trigger,
+      sources: input.sources ?? [],
+      events: [],
+      tags: input.tags ?? [],
+      metadata: input.metadata,
+      lifecycle: input.lifecycle,
+      createdAt: "now",
+      updatedAt: "now",
+    } as ResearchRun;
+    this.runs.push(run);
+    return run;
+  }
+
+  updateStatus(id: string, status: ResearchRun["status"], extra?: Partial<ResearchRun>): void {
+    const run = this.runs.find((candidate) => candidate.id === id);
+    if (!run) throw new Error("missing research run");
+    Object.assign(run, extra ?? {}, { status });
+  }
+}
+
 class FakeTaskStore {
   tasks: Task[] = [];
   workflowSteps: WorkflowStep[] = [];
-  documents: Array<{ taskId: string; key: string; content: string; metadata?: Record<string, unknown> }> = [];
+  documents: Array<TaskDocument> = [];
+  researchStore = new FakeResearchStore();
 
   constructor(readonly label: string) {}
 
@@ -72,9 +103,20 @@ class FakeTaskStore {
     return task;
   }
 
-  async upsertTaskDocument(taskId: string, input: { key: string; content: string; metadata?: Record<string, unknown> }) {
-    this.documents.push({ taskId, ...input });
-    return { id: `${taskId}:${input.key}`, taskId, key: input.key, content: input.content, author: "fusion", metadata: input.metadata ?? {}, createdAt: "now", updatedAt: "now" };
+  async upsertTaskDocument(taskId: string, input: { key: string; content: string; metadata?: Record<string, unknown>; author?: string }) {
+    const document = { id: `${taskId}:${input.key}`, taskId, key: input.key, content: input.content, revision: 1, author: input.author ?? "fusion", metadata: input.metadata ?? {}, createdAt: "now", updatedAt: "now" } as TaskDocument;
+    const index = this.documents.findIndex((candidate) => candidate.taskId === taskId && candidate.key === input.key);
+    if (index >= 0) this.documents[index] = document;
+    else this.documents.push(document);
+    return document;
+  }
+
+  async getTaskDocument(taskId: string, key: string): Promise<TaskDocument | null> {
+    return this.documents.find((document) => document.taskId === taskId && document.key === key) ?? null;
+  }
+
+  getResearchStore(): FakeResearchStore {
+    return this.researchStore;
   }
 
   async listWorkflowSteps(): Promise<WorkflowStep[]> {
@@ -102,6 +144,26 @@ class FakeTaskStore {
 
   async listTasks(): Promise<Task[]> {
     return this.tasks;
+  }
+}
+
+class FakeRouteMcpClient implements LegalMcpClient {
+  readonly calls: Array<{ name: string; input: Record<string, unknown> }> = [];
+  closed = false;
+
+  constructor(readonly serverName: string, private readonly tools: LegalMcpTool[], private readonly result: unknown) {}
+
+  async listTools(): Promise<LegalMcpTool[]> {
+    return this.tools;
+  }
+
+  async callTool(name: string, input: Record<string, unknown>): Promise<unknown> {
+    this.calls.push({ name, input });
+    return this.result;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
   }
 }
 
@@ -135,7 +197,7 @@ class FakeAgentStore {
   }
 }
 
-function buildApp() {
+function buildApp(routeDeps: Partial<Parameters<typeof registerLegalWorkflowRoutes>[1]> = {}) {
   const defaultStore = new FakeTaskStore("default");
   const projectStore = new FakeTaskStore("project");
   const agentStores = new Map<FakeTaskStore, FakeAgentStore>();
@@ -160,6 +222,7 @@ function buildApp() {
 
   registerLegalWorkflowRoutes(ctx, {
     createAgentStore: (store) => agentStores.get(store as FakeTaskStore)!,
+    ...routeDeps,
   });
   app.use("/api", router);
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -211,6 +274,26 @@ describe("legal workflow routes", () => {
     expect(defaultStore.tasks[0].sourceType).toBe("dashboard_ui");
     expect(defaultStore.tasks[0].sourceMetadata?.workflowRunId).toBe(body.runId);
     expect(defaultAgentStore.agents.every((agent) => JSON.stringify(agent.metadata.skills) === JSON.stringify(["legal-research", "legal-drafting"]))).toBe(true);
+    expect(body.vaultMining).toMatchObject({ runId: body.runId, receiptsDocumentKey: "vault-mining-receipts" });
+  });
+
+  it("POST launch automatically runs bounded vault mining and returns the summary", async () => {
+    const qmdClient = new FakeRouteMcpClient("qmd-mcp", [{ name: "search" }], [{ path: "vault/qmd.md", excerpt: "qmd" }]);
+    const obsidianClient = new FakeRouteMcpClient("obsidian-vault", [{ name: "obsidian.search" }], [{ path: "vault/obsidian.md", excerpt: "obsidian" }]);
+    const { app, defaultStore } = buildApp({
+      mcpClientFactory: async ({ provider }) => provider === "qmd"
+        ? { client: qmdClient, mcpServerName: "qmd-mcp" }
+        : { client: obsidianClient, mcpServerName: "obsidian-vault" },
+    });
+
+    const response = await request(app, "POST", "/api/legal-workflows/counter-lawsuit/runs", launchBody(), { "Content-Type": "application/json" });
+
+    expect(response.status).toBe(201);
+    const body = response.body as any;
+    expect(body.vaultMining).toMatchObject({ status: "completed", receiptCount: 6, researchRunId: "RR-1" });
+    expect(defaultStore.documents.some((document) => document.key === "vault-mining-receipts" && document.content.includes("vault/qmd.md"))).toBe(true);
+    expect(defaultStore.researchStore.runs[0].sources.map((source) => source.reference)).toContain("vault/qmd.md");
+    expect(defaultStore.researchStore.runs[0].sources.map((source) => source.reference)).toContain("vault/obsidian.md");
   });
 
   it("returns 400 for invalid launch payloads", async () => {
@@ -235,6 +318,36 @@ describe("legal workflow routes", () => {
     expect(defaultStore.tasks[0].description).toContain("Treat all source discovery as unverified");
   });
 
+  it("POST retry vault mining for an existing run accepts only read-only override shape", async () => {
+    const qmdClient = new FakeRouteMcpClient("qmd-mcp", [{ name: "qmd.search" }], [{ path: "vault/retry.md", excerpt: "retry" }]);
+    const { app } = buildApp({
+      mcpClientFactory: async ({ provider }) => provider === "qmd"
+        ? { client: qmdClient, mcpServerName: "qmd-mcp" }
+        : null,
+      searchProjectMemoryFn: async () => [],
+    });
+    const launch = await request(app, "POST", "/api/legal-workflows/counter-lawsuit/runs", launchBody(), { "Content-Type": "application/json" });
+    const runId = (launch.body as any).runId;
+
+    const response = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/vault-mining`, JSON.stringify({ queries: ["retry query"], qmd: { searchToolName: "qmd.search" } }), { "Content-Type": "application/json" });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ runId, receiptCount: 1, receiptsDocumentKey: "vault-mining-receipts" });
+    expect(qmdClient.calls.at(-1)?.input.query).toBe("retry query");
+  });
+
+  it("POST retry vault mining rejects invalid payloads and mutating tool overrides", async () => {
+    const { app } = buildApp();
+    const launch = await request(app, "POST", "/api/legal-workflows/counter-lawsuit/runs", launchBody(), { "Content-Type": "application/json" });
+    const runId = (launch.body as any).runId;
+
+    const invalidQueries = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/vault-mining`, JSON.stringify({ queries: "bad" }), { "Content-Type": "application/json" });
+    expect(invalidQueries.status).toBe(400);
+
+    const invalidTool = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/vault-mining`, JSON.stringify({ qmd: { searchToolName: "delete" } }), { "Content-Type": "application/json" });
+    expect(invalidTool.status).toBe(400);
+  });
+
   it("GET derives status and artifact states from tasks with matching run provenance", async () => {
     const { app, defaultStore } = buildApp();
     const launch = await request(app, "POST", "/api/legal-workflows/counter-lawsuit/runs", launchBody(), { "Content-Type": "application/json" });
@@ -252,6 +365,7 @@ describe("legal workflow routes", () => {
     expect(body.artifacts[0]).toMatchObject({ id: "research-memo", status: "ready", taskId: "DEFAULT-001" });
     expect(body.artifacts[1]).toMatchObject({ id: "evidence-ledger", status: "generating", taskId: "DEFAULT-002" });
     expect(body.lineageDocuments[0]).toEqual({ taskId: "DEFAULT-001", documentKey: "counter-lawsuit-run", stage: "research-memo" });
+    expect(body.vaultMining).toMatchObject({ receiptsDocumentKey: "vault-mining-receipts" });
   });
 
   it("GET returns 404 for unknown run IDs", async () => {
