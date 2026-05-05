@@ -89,6 +89,7 @@ const BUNDLED_PLUGIN_RUNTIMES: Array<{
 import { createSessionDiagnostics } from "./ai-session-diagnostics.js";
 import { createApiRoutesContext } from "./routes/context.js";
 import { registerTaskWorkflowRoutes } from "./routes/register-task-workflow-routes.js";
+import { registerLegalWorkflowRoutes } from "./routes/register-legal-workflow-routes.js";
 import { registerPlanningSubtaskRoutes } from "./routes/register-planning-subtask-routes.js";
 import { registerChatRoutes } from "./routes/register-chat-routes.js";
 import { registerSettingsMemoryRoutes } from "./routes/register-settings-memory-routes.js";
@@ -960,6 +961,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     trimTaskDetailActivityLog,
     triggerCommentWakeForAssignedAgent: (...args) => triggerCommentWakeForAssignedAgent(...args),
   });
+  registerLegalWorkflowRoutes(routeContext);
   registerPlanningSubtaskRoutes(routeContext, {
     store,
     aiSessionStore,

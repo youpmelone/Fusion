@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { startCounterLawsuitPrototypeWorkflow, type StartCounterLawsuitPrototypeWorkflowInput } from "../legacy";
+import {
+  fetchCounterLawsuitPrototypeWorkflowRunStatus,
+  startCounterLawsuitPrototypeWorkflow,
+  type StartCounterLawsuitPrototypeWorkflowInput,
+} from "../legacy";
 
 const input: StartCounterLawsuitPrototypeWorkflowInput = {
   matterName: "Acme response matter",
@@ -48,5 +52,31 @@ describe("legal workflow API helpers", () => {
       preserveLineage: true,
       humanVerificationRequired: true,
     });
+  });
+
+  it("fetches counter-lawsuit prototype run status with project scoping", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          runId: "CLW-1",
+          status: "running",
+          stageTasks: [],
+          artifacts: [],
+          artifactKeys: [],
+          safetyGates: ["citation-source-verification"],
+          sourceScopeStatus: "unspecified",
+          lineageDocuments: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    const response = await fetchCounterLawsuitPrototypeWorkflowRunStatus("CLW/1", "proj/legal+workflow");
+
+    expect(response.status).toBe("running");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs/CLW%2F1?projectId=proj%2Flegal%2Bworkflow");
+    expect(init?.method).toBeUndefined();
   });
 });
