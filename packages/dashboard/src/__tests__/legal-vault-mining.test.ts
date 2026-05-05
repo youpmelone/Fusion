@@ -265,6 +265,22 @@ describe("vault mining receipt normalization", () => {
     expect(normalized.receipts[0]).toMatchObject({ sourcePath: "Vault/Timeline.md", excerpt: "MCP JSON excerpt", verified: false });
   });
 
+  it("does not persist primitive raw rejected-hit bodies as raw summaries", () => {
+    const normalized = normalizeVaultMiningProviderPayload({
+      providerName: "qmd",
+      sourceSystem: "qmd-mcp",
+      mcpServerName: "qmd-mcp",
+      toolName: "search",
+      query: "Acme",
+      rawResult: "raw note body Authorization: Bearer abcdefghijklmnop should not persist",
+    });
+
+    expect(normalized.receipts).toHaveLength(0);
+    expect(normalized.rejectedHits[0].rawResultSummary).toBe("string(length=71)");
+    expect(JSON.stringify(normalized.rejectedHits)).not.toContain("raw note body");
+    expect(JSON.stringify(normalized.rejectedHits)).not.toContain("Authorization: Bearer abcdefghijklmnop");
+  });
+
   it("quarantines hits without usable source paths and deduplicates matching receipts", () => {
     const normalized = normalizeVaultMiningProviderPayload({
       providerName: "obsidian",
@@ -370,6 +386,49 @@ describe("mineCounterLawsuitVaultSources", () => {
       await store.close();
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("preserves accepted MCP receipts when a later query fails", async () => {
+    class PartialFailClient extends FakeMcpClient {
+      callCount = 0;
+      override async callTool(name: string, input: Record<string, unknown>): Promise<unknown> {
+        this.callCount += 1;
+        if (this.callCount > 1) throw new Error("later query failed");
+        return super.callTool(name, input);
+      }
+    }
+    const taskStore = new FakeTaskStore();
+    const qmdClient = new PartialFailClient("qmd-mcp", [{ name: "search" }], [{ path: "vault/first.md", excerpt: "first" }]);
+    const result = await mineCounterLawsuitVaultSources({
+      taskStore: taskStore as never,
+      runId: "CLW-1",
+      request: { queries: ["Acme", "Retaliation"] },
+      mcpClientFactory: async ({ provider }) => provider === "qmd"
+        ? { client: qmdClient, mcpServerName: "qmd-mcp" }
+        : null,
+      searchProjectMemoryFn: async () => [],
+    });
+
+    expect(result.receipts.map((receipt) => receipt.sourcePath)).toContain("vault/first.md");
+    expect(result.providerDiagnostics.find((diagnostic) => diagnostic.providerName === "qmd")?.status).toBe("partial");
+  });
+
+  it("preserves accepted QMD fallback receipts when a later fallback query fails", async () => {
+    const taskStore = new FakeTaskStore();
+    const searchProjectMemoryFn = vi.fn()
+      .mockResolvedValueOnce([{ path: ".fusion/memory/MEMORY.md", lineStart: 1, lineEnd: 1, snippet: "first fallback", score: 1, backend: "qmd" }])
+      .mockRejectedValueOnce(new Error("fallback failed"));
+
+    const result = await mineCounterLawsuitVaultSources({
+      taskStore: taskStore as never,
+      runId: "CLW-1",
+      request: { queries: ["Acme", "Retaliation"] },
+      mcpClientFactory: async () => null,
+      searchProjectMemoryFn: searchProjectMemoryFn as never,
+    });
+
+    expect(result.receipts.map((receipt) => receipt.sourcePath)).toContain(".fusion/memory/MEMORY.md");
+    expect(result.providerDiagnostics.find((diagnostic) => diagnostic.providerName === "qmd-memory-fallback")?.status).toBe("partial");
   });
 
   it("uses QMD project-memory fallback only when QMD MCP is unavailable", async () => {

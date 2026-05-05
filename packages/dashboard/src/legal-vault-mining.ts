@@ -151,7 +151,7 @@ function boundedOptionalNumber(value: unknown): number | undefined {
 
 function rawSummary(raw: unknown): string {
   if (Array.isArray(raw)) return `array(${raw.length})`;
-  if (!raw || typeof raw !== "object") return boundedText(String(raw), MAX_SUMMARY_CHARS) ?? "primitive";
+  if (!raw || typeof raw !== "object") return `${typeof raw}(length=${String(raw).length})`;
   const record = raw as Record<string, unknown>;
   const keys = Object.keys(record).filter((key) => !TOKEN_KEY_RE.test(key)).slice(0, 8);
   const count = Array.isArray(record.results) ? record.results.length
@@ -512,17 +512,20 @@ async function runMcpProvider(params: {
     };
   } catch (error) {
     await resolved.client.close().catch(() => undefined);
+    const deduped = dedupeReceipts({ receipts: allReceipts, rejectedHits: allRejected });
     return {
-      receipts: [],
-      rejectedHits: [],
-      unavailable: true,
+      ...deduped,
+      unavailable: deduped.receipts.length === 0,
       diagnostic: {
         providerName,
         sourceSystem: params.sourceSystem,
         mcpServerName: resolved.mcpServerName,
-        status: "error",
+        status: deduped.receipts.length > 0 ? "partial" : "error",
         message: redactSecrets(error instanceof Error ? error.message : String(error)),
         redactedConfig: resolved.redactedConfig,
+        acceptedCount: deduped.receipts.length,
+        rejectedCount: deduped.rejectedHits.length,
+        rejectedHits: deduped.rejectedHits,
       },
     };
   }
@@ -607,14 +610,18 @@ async function runQmdFallback(params: {
       },
     };
   } catch (error) {
+    const deduped = dedupeReceipts({ receipts: allReceipts, rejectedHits: allRejected });
     return {
-      receipts: [],
-      rejectedHits: [],
+      ...deduped,
       diagnostic: {
         providerName: "qmd-memory-fallback",
         sourceSystem: "qmd-memory-fallback",
-        status: "error",
+        status: deduped.receipts.length > 0 ? "partial" : "error",
         message: redactSecrets(error instanceof Error ? error.message : String(error)),
+        toolName: "searchProjectMemory",
+        acceptedCount: deduped.receipts.length,
+        rejectedCount: deduped.rejectedHits.length,
+        rejectedHits: deduped.rejectedHits,
       },
     };
   }
