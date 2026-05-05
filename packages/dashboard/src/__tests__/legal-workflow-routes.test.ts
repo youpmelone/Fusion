@@ -275,6 +275,7 @@ describe("legal workflow routes", () => {
     expect(defaultStore.tasks[0].sourceMetadata?.workflowRunId).toBe(body.runId);
     expect(defaultAgentStore.agents.every((agent) => JSON.stringify(agent.metadata.skills) === JSON.stringify(["legal-research", "legal-drafting"]))).toBe(true);
     expect(body.vaultMining).toMatchObject({ runId: body.runId, receiptsDocumentKey: "vault-mining-receipts" });
+    expect(body.vaultMining.safetyNotice).toContain("not legally verified");
   });
 
   it("POST launch automatically runs bounded vault mining and returns the summary", async () => {
@@ -372,6 +373,7 @@ describe("legal workflow routes", () => {
     expect(body.artifacts[1]).toMatchObject({ id: "evidence-ledger", status: "generating", taskId: "DEFAULT-002" });
     expect(body.lineageDocuments[0]).toEqual({ taskId: "DEFAULT-001", documentKey: "counter-lawsuit-run", stage: "research-memo" });
     expect(body.vaultMining).toMatchObject({ runId, receiptsDocumentKey: "vault-mining-receipts" });
+    expect(body.vaultMining.safetyNotice).toContain("not promoted for filing");
   });
 
   it("GET returns 404 for unknown run IDs", async () => {

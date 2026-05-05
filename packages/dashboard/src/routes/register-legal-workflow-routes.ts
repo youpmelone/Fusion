@@ -11,6 +11,7 @@ import {
   mineCounterLawsuitVaultSources,
   validateVaultMiningOverrides,
   VAULT_MINING_RECEIPTS_DOCUMENT_KEY,
+  VAULT_MINING_SAFETY_NOTICE,
   type LegalVaultMcpClientFactory,
   type VaultMiningProviderDiagnostic,
   type VaultMiningRequest,
@@ -33,6 +34,7 @@ export interface LegalWorkflowVaultMiningSummary {
   receiptsDocumentKey?: string;
   statusDocumentKey?: string;
   providerDiagnostics: VaultMiningProviderDiagnostic[];
+  safetyNotice: string;
 }
 
 function getTaskStoreFusionDir(store: TaskStore): string {
@@ -95,6 +97,7 @@ function vaultMiningFailureSummary(runId: string): LegalWorkflowVaultMiningSumma
       status: "error",
       message: "Vault mining failed before receipts were persisted. Stage tasks remain queued; retry the vault-mining endpoint after checking MCP configuration.",
     }],
+    safetyNotice: VAULT_MINING_SAFETY_NOTICE,
   };
 }
 
@@ -123,6 +126,7 @@ async function runVaultMiningForResponse(params: {
       receiptsDocumentKey: result.receiptsDocumentKey,
       statusDocumentKey: result.statusDocumentKey,
       providerDiagnostics: result.providerDiagnostics,
+      safetyNotice: result.safetyNotice,
     };
   } catch (error) {
     if (error instanceof ApiError && error.statusCode === 404) throw error;

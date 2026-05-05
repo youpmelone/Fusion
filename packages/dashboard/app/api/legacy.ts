@@ -8395,6 +8395,7 @@ export interface CounterLawsuitVaultMiningSummary {
   receiptsDocumentKey?: "vault-mining-receipts" | string;
   statusDocumentKey?: "vault-mining-status" | string;
   providerDiagnostics: CounterLawsuitVaultMiningDiagnostic[];
+  safetyNotice: string;
 }
 
 export interface CounterLawsuitVaultMiningRetryInput {

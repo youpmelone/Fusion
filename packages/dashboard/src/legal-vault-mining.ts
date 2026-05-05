@@ -19,6 +19,7 @@ import {
 export const VAULT_MINING_RECEIPTS_DOCUMENT_KEY = "vault-mining-receipts";
 export const VAULT_MINING_STATUS_DOCUMENT_KEY = "vault-mining-status";
 export const VAULT_MINING_RESEARCH_TRIGGER = "legal-counter-lawsuit-vault-mining";
+export const VAULT_MINING_SAFETY_NOTICE = "Mined vault material is source-linked only; it is not legally verified, not citation-validated, and not promoted for filing until later safety gates and qualified human review pass.";
 
 export type VaultMiningSourceSystem = "qmd-mcp" | "obsidian-mcp" | "qmd-memory-fallback";
 export type VaultMiningProviderStatus = "available" | "unavailable" | "partial" | "error" | "skipped";
@@ -104,6 +105,7 @@ export interface VaultMiningResult {
   providerDiagnostics: VaultMiningProviderDiagnostic[];
   rejectedHits: RejectedVaultMiningHit[];
   queries: string[];
+  safetyNotice: typeof VAULT_MINING_SAFETY_NOTICE;
 }
 
 export interface MineCounterLawsuitVaultSourcesOptions {
@@ -638,7 +640,7 @@ function buildReceiptsDocument(params: {
 }): string {
   return `# Vault-mining receipts
 
-These mined materials are source-linked discovery receipts only. They are not legally verified, not citation-validated, and not promoted for filing until later source/citation verification, opposing-counsel red-team, lineage, and qualified human review gates pass.
+${VAULT_MINING_SAFETY_NOTICE}
 
 - Research run ID: ${params.researchRunId ?? "not persisted"}
 - Queries: ${params.result.queries.join(" | ")}
@@ -652,7 +654,7 @@ ${params.receipts.map((receipt) => `- ${receipt.receiptId} — ${receipt.sourceS
 
 \`\`\`json
 ${JSON.stringify({
-    safetyNotice: "Source-linked only; not legally verified, not citation-validated, not promoted for filing.",
+    safetyNotice: VAULT_MINING_SAFETY_NOTICE,
     researchRunId: params.researchRunId,
     queries: params.result.queries,
     receipts: params.receipts,
@@ -668,7 +670,7 @@ function buildStatusDocument(result: VaultMiningResult): string {
 
 Vault mining status: ${result.status}
 
-Mined material is source-linked only. It is not legally verified, not citation-validated, and not promoted for filing.
+${VAULT_MINING_SAFETY_NOTICE}
 
 - Research run ID: ${result.researchRunId ?? "none"}
 - Receipt count: ${result.receiptCount}
@@ -720,7 +722,7 @@ function persistResearchRun(params: {
         "lineage preservation required",
         "qualified human legal review required",
       ],
-      safetyNotice: "Receipts are source-linked only; verified is false; no legal authority or citation validation has occurred.",
+      safetyNotice: VAULT_MINING_SAFETY_NOTICE,
     },
     lifecycle: { maxAttempts: 1 },
   });
@@ -807,6 +809,7 @@ export async function mineCounterLawsuitVaultSources(options: MineCounterLawsuit
     providerDiagnostics: diagnostics,
     rejectedHits: deduped.rejectedHits,
     queries,
+    safetyNotice: VAULT_MINING_SAFETY_NOTICE,
   };
 
   await options.taskStore.upsertTaskDocument(researchMemoTask.id, {
@@ -820,7 +823,7 @@ export async function mineCounterLawsuitVaultSources(options: MineCounterLawsuit
       receipts: deduped.receipts,
       rejectedHits: deduped.rejectedHits,
       providerDiagnostics: diagnostics,
-      safetyNotice: "Source-linked only; not legally verified, not citation-validated, not promoted for filing.",
+      safetyNotice: VAULT_MINING_SAFETY_NOTICE,
     },
   });
 
@@ -862,16 +865,17 @@ export async function deriveVaultMiningStatusForRun(params: {
   receiptsDocumentKey?: string;
   statusDocumentKey?: string;
   providerDiagnostics: VaultMiningProviderDiagnostic[];
+  safetyNotice: typeof VAULT_MINING_SAFETY_NOTICE;
 }> {
   const tasks = (await params.taskStore.listTasks({ includeArchived: true } as never)).filter((task) => taskMatchesRun(task, params.runId));
   const researchMemoTask = findResearchMemoTask(tasks);
   if (!researchMemoTask) {
-    return { runId: params.runId, status: "not-run", receiptCount: 0, providerDiagnostics: [] };
+    return { runId: params.runId, status: "not-run", receiptCount: 0, providerDiagnostics: [], safetyNotice: VAULT_MINING_SAFETY_NOTICE };
   }
   const doc = await params.taskStore.getTaskDocument(researchMemoTask.id, VAULT_MINING_RECEIPTS_DOCUMENT_KEY).catch(() => null);
   const statusDoc = await params.taskStore.getTaskDocument(researchMemoTask.id, VAULT_MINING_STATUS_DOCUMENT_KEY).catch(() => null);
   if (!doc) {
-    return { runId: params.runId, status: "not-run", receiptCount: 0, providerDiagnostics: [] };
+    return { runId: params.runId, status: "not-run", receiptCount: 0, providerDiagnostics: [], safetyNotice: VAULT_MINING_SAFETY_NOTICE };
   }
   const metadata = doc.metadata ?? {};
   const receipts = Array.isArray(metadata.receipts) ? metadata.receipts as PersistedVaultMiningReceipt[] : [];
@@ -887,5 +891,6 @@ export async function deriveVaultMiningStatusForRun(params: {
     receiptsDocumentKey: VAULT_MINING_RECEIPTS_DOCUMENT_KEY,
     statusDocumentKey: statusDoc ? VAULT_MINING_STATUS_DOCUMENT_KEY : undefined,
     providerDiagnostics,
+    safetyNotice: VAULT_MINING_SAFETY_NOTICE,
   };
 }

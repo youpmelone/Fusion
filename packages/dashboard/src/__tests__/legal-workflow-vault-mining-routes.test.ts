@@ -143,14 +143,18 @@ describe("legal workflow vault-mining routes", () => {
     expect(launch.status).toBe(201);
     const runId = (launch.body as any).runId;
     expect((launch.body as any).vaultMining).toMatchObject({ status: "completed", receiptCount: 2, receiptsDocumentKey: "vault-mining-receipts" });
+    expect((launch.body as any).vaultMining.safetyNotice).toContain("not legally verified");
+    expect((launch.body as any).vaultMining.safetyNotice).toContain("not promoted for filing");
 
     const retry = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/vault-mining`, JSON.stringify({ queries: ["Acme"], maxResultsPerProvider: 2 }), { "Content-Type": "application/json" });
     expect(retry.status).toBe(200);
     expect(retry.body).toMatchObject({ runId, receiptCount: 2, receiptsDocumentKey: "vault-mining-receipts" });
+    expect((retry.body as any).safetyNotice).toContain("not citation-validated");
 
     const status = await request(app, "GET", `/api/legal-workflows/counter-lawsuit/runs/${runId}`);
     expect(status.status).toBe(200);
     expect((status.body as any).vaultMining).toMatchObject({ runId, receiptCount: 2, researchRunId: "RR-2" });
+    expect((status.body as any).vaultMining.safetyNotice).toContain("qualified human review");
     expect(store.documents.some((doc) => doc.key === "vault-mining-receipts" && doc.content.includes("not legally verified"))).toBe(true);
   });
 

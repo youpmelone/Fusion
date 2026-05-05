@@ -34,7 +34,7 @@ describe("legal workflow API helpers", () => {
           taskId: "FN-200",
           message: "Queued",
           artifacts: [{ id: "claim-map", label: "Claim map", status: "queued" }],
-          vaultMining: { runId: "LWR-1", status: "partial", receiptCount: 0, providerDiagnostics: [] },
+          vaultMining: { runId: "LWR-1", status: "partial", receiptCount: 0, providerDiagnostics: [], safetyNotice: "not legally verified" },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -69,7 +69,7 @@ describe("legal workflow API helpers", () => {
           safetyGates: ["citation-source-verification"],
           sourceScopeStatus: "unspecified",
           lineageDocuments: [],
-          vaultMining: { runId: "CLW-1", status: "not-run", receiptCount: 0, providerDiagnostics: [] },
+          vaultMining: { runId: "CLW-1", status: "not-run", receiptCount: 0, providerDiagnostics: [], safetyNotice: "not promoted for filing" },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -95,6 +95,7 @@ describe("legal workflow API helpers", () => {
           receiptCount: 2,
           receiptsDocumentKey: "vault-mining-receipts",
           providerDiagnostics: [],
+          safetyNotice: "not citation-validated",
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -103,6 +104,7 @@ describe("legal workflow API helpers", () => {
     const response = await runCounterLawsuitPrototypeVaultMining("CLW/1", { queries: ["Acme"], qmd: { searchToolName: "qmd.search" } }, "proj/legal+workflow");
 
     expect(response.receiptCount).toBe(2);
+    expect(response.safetyNotice).toContain("not citation-validated");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs/CLW%2F1/vault-mining?projectId=proj%2Flegal%2Bworkflow");
