@@ -59,6 +59,7 @@ export const OBSIDIAN_READ_TOOL_ALLOWLIST = [
 
 const MUTATING_TOOL_RE = /(?:^|[._-])(write|create|update|delete|move|rename|append|patch)(?:$|[._-])/i;
 const SECRET_KEY_RE = /(?:token|secret|key|password|credential|auth)/i;
+const SECRET_VALUE_RE = /(?:sk|pk|ghp|github_pat|bearer|token|secret|api[_-]?key)[A-Za-z0-9_:\-.=+/]{8,}/i;
 const DEFAULT_MCP_TIMEOUT_MS = 8_000;
 
 function aliasesForProvider(provider: LegalMcpProviderName): readonly string[] {
@@ -81,13 +82,32 @@ export function assertAllowedLegalMcpTool(provider: LegalMcpProviderName, toolNa
   }
 }
 
+function redactMcpArgs(args: string[] | undefined): string[] | undefined {
+  if (!args) return undefined;
+  const redacted: string[] = [];
+  let redactNext = false;
+  for (const arg of args) {
+    const hasInlineSecret = SECRET_VALUE_RE.test(arg) || /^(?:--)?[^=]*(?:token|secret|key|password|credential|auth)[^=]*=/i.test(arg);
+    if (redactNext || hasInlineSecret) {
+      redacted.push("[REDACTED]");
+      redactNext = false;
+      continue;
+    }
+    redacted.push(arg);
+    if (/^(?:--)?(?:token|secret|key|password|credential|auth|api-key|api_token)$/i.test(arg)) {
+      redactNext = true;
+    }
+  }
+  return redacted;
+}
+
 export function redactMcpServerConfig(config: LegalMcpServerConfig): LegalMcpServerConfig {
   const env = config.env
     ? Object.fromEntries(Object.entries(config.env).map(([key, value]) => [key, SECRET_KEY_RE.test(key) || value ? "[REDACTED]" : value]))
     : undefined;
   return {
     command: config.command,
-    ...(config.args ? { args: [...config.args] } : {}),
+    ...(config.args ? { args: redactMcpArgs(config.args) } : {}),
     ...(env ? { env } : {}),
   };
 }
@@ -285,6 +305,7 @@ export class StdioLegalMcpClient implements LegalMcpClient {
     readonly serverName: string,
     private readonly config: LegalMcpServerConfig,
     private readonly cwd: string,
+    private readonly provider?: LegalMcpProviderName,
   ) {}
 
   private async ensureConnection(timeoutMs: number): Promise<JsonRpcStdioConnection> {
@@ -324,6 +345,9 @@ export class StdioLegalMcpClient implements LegalMcpClient {
   }
 
   async callTool(name: string, input: Record<string, unknown>, timeoutMs = DEFAULT_MCP_TIMEOUT_MS): Promise<unknown> {
+    if (this.provider) {
+      assertAllowedLegalMcpTool(this.provider, name);
+    }
     const connection = await this.ensureConnection(timeoutMs);
     return connection.request("tools/call", { name, arguments: input }, timeoutMs);
   }
@@ -342,7 +366,7 @@ export async function createLegalMcpClientFromProjectConfig(params: {
   const server = resolveLegalMcpServer(config, params.provider, params.serverName);
   if (!server) return null;
   return {
-    client: new StdioLegalMcpClient(server.name, server.config, params.rootDir),
+    client: new StdioLegalMcpClient(server.name, server.config, params.rootDir, params.provider),
     server,
   };
 }

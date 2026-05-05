@@ -161,14 +161,53 @@ function rawSummary(raw: unknown): string {
   return redactSecrets(`object(keys=${keys.join(",")}${count !== undefined ? `, results=${count}` : ""})`).slice(0, MAX_SUMMARY_CHARS);
 }
 
+function tryParseJsonText(text: string): unknown | undefined {
+  const trimmed = text.trim();
+  if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) return undefined;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractMcpContentResults(record: Record<string, unknown>): unknown[] | undefined {
+  if (record.structuredContent !== undefined) {
+    const structured = candidateResults(record.structuredContent);
+    if (structured.length > 0) return structured;
+  }
+  if (!Array.isArray(record.content)) return undefined;
+  const expanded: unknown[] = [];
+  for (const item of record.content) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      expanded.push(item);
+      continue;
+    }
+    const contentItem = item as Record<string, unknown>;
+    if (typeof contentItem.text === "string") {
+      const parsed = tryParseJsonText(contentItem.text);
+      if (parsed !== undefined) {
+        expanded.push(...candidateResults(parsed));
+      } else {
+        expanded.push({ text: contentItem.text });
+      }
+      continue;
+    }
+    expanded.push(contentItem);
+  }
+  return expanded;
+}
+
 function candidateResults(raw: unknown): unknown[] {
   if (Array.isArray(raw)) return raw;
   if (!raw || typeof raw !== "object") return [raw];
   const record = raw as Record<string, unknown>;
-  for (const key of ["results", "matches", "items", "sources", "documents", "content"] as const) {
+  const mcpContentResults = extractMcpContentResults(record);
+  if (mcpContentResults) return mcpContentResults;
+  for (const key of ["results", "matches", "items", "sources", "documents"] as const) {
     if (Array.isArray(record[key])) return record[key] as unknown[];
   }
-  if (record.content && typeof record.content === "object" && Array.isArray((record.content as Record<string, unknown>).results)) {
+  if (record.content && typeof record.content === "object" && !Array.isArray(record.content) && Array.isArray((record.content as Record<string, unknown>).results)) {
     return (record.content as Record<string, unknown>).results as unknown[];
   }
   return [raw];
@@ -367,12 +406,18 @@ async function defaultMcpClientFactory(params: { rootDir: string; provider: Lega
   };
 }
 
+function isSearchTool(provider: LegalMcpProviderName, toolName: string): boolean {
+  if (!isAllowedLegalMcpTool(provider, toolName)) return false;
+  if (provider === "qmd") return true;
+  return ["search", "obsidian_search", "obsidian.search", "simple_search", "obsidian_simple_search"].includes(toolName);
+}
+
 function selectTool(provider: LegalMcpProviderName, tools: LegalMcpTool[], overrideName?: string): string | undefined {
   if (overrideName) {
     assertAllowedLegalMcpTool(provider, overrideName);
-    return tools.some((tool) => tool.name === overrideName) ? overrideName : undefined;
+    return tools.some((tool) => tool.name === overrideName) && isSearchTool(provider, overrideName) ? overrideName : undefined;
   }
-  return tools.find((tool) => isAllowedLegalMcpTool(provider, tool.name))?.name;
+  return tools.find((tool) => isSearchTool(provider, tool.name))?.name;
 }
 
 async function runMcpProvider(params: {
@@ -466,7 +511,7 @@ async function runMcpProvider(params: {
         sourceSystem: params.sourceSystem,
         mcpServerName: resolved.mcpServerName,
         status: "error",
-        message: error instanceof Error ? error.message : String(error),
+        message: redactSecrets(error instanceof Error ? error.message : String(error)),
         redactedConfig: resolved.redactedConfig,
       },
     };
@@ -559,7 +604,7 @@ async function runQmdFallback(params: {
         providerName: "qmd-memory-fallback",
         sourceSystem: "qmd-memory-fallback",
         status: "error",
-        message: error instanceof Error ? error.message : String(error),
+        message: redactSecrets(error instanceof Error ? error.message : String(error)),
       },
     };
   }

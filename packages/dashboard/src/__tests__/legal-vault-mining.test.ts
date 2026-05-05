@@ -9,6 +9,7 @@ import {
   loadLegalMcpConfig,
   redactMcpServerConfig,
   resolveLegalMcpServer,
+  StdioLegalMcpClient,
   type LegalMcpClient,
   type LegalMcpTool,
 } from "../legal-mcp-client.js";
@@ -156,7 +157,7 @@ describe("legal MCP client configuration and allowlist", () => {
     try {
       await writeFile(join(root, ".mcp.json"), JSON.stringify({
         mcpServers: {
-          "qmd-mcp": { command: "qmd", args: ["mcp"], env: { QMD_TOKEN: "secret-token-value" } },
+          "qmd-mcp": { command: "qmd", args: ["mcp", "--token", "qmd-token-secret-value"], env: { QMD_TOKEN: "secret-token-value" } },
           "obsidian-vault": { command: "obsidian-mcp", env: { OBSIDIAN_API_KEY: "secret" } },
         },
       }));
@@ -166,7 +167,9 @@ describe("legal MCP client configuration and allowlist", () => {
       expect(qmd?.name).toBe("qmd-mcp");
       expect(obsidian?.name).toBe("obsidian-vault");
       expect(qmd?.redactedConfig.env?.QMD_TOKEN).toBe("[REDACTED]");
+      expect(qmd?.redactedConfig.args).toEqual(["mcp", "--token", "[REDACTED]"]);
       expect(JSON.stringify(qmd?.redactedConfig)).not.toContain("secret-token-value");
+      expect(JSON.stringify(qmd?.redactedConfig)).not.toContain("qmd-token-secret-value");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -178,6 +181,11 @@ describe("legal MCP client configuration and allowlist", () => {
     expect(isAllowedLegalMcpTool("obsidian", "write")).toBe(false);
     expect(isAllowedLegalMcpTool("qmd", "qmd.update")).toBe(false);
     expect(() => assertAllowedLegalMcpTool("obsidian", "delete_note")).toThrow(/read-only/);
+  });
+
+  it("enforces the read-only allowlist inside the stdio MCP wrapper", async () => {
+    const client = new StdioLegalMcpClient("qmd", { command: "missing-command" }, process.cwd(), "qmd");
+    await expect(client.callTool("qmd.update", { query: "Acme" })).rejects.toThrow(/read-only/);
   });
 
   it("redacts every configured env value in diagnostics", () => {
@@ -220,6 +228,24 @@ describe("vault mining receipt normalization", () => {
     expect(normalized.receipts[0].excerpt).not.toContain("sk-secret");
     expect(normalized.receipts[0].hash).toMatch(/^[a-f0-9]{64}$/);
     expect(normalized.receipts[0].receiptId).toMatch(/^LVR-/);
+  });
+
+  it("normalizes standard MCP CallToolResult text JSON payloads", () => {
+    const normalized = normalizeVaultMiningProviderPayload({
+      providerName: "obsidian",
+      sourceSystem: "obsidian-mcp",
+      mcpServerName: "obsidian-vault",
+      toolName: "search",
+      query: "Acme",
+      rawResult: {
+        content: [
+          { type: "text", text: JSON.stringify({ results: [{ path: "Vault/Timeline.md", snippet: "MCP JSON excerpt" }] }) },
+        ],
+      },
+    });
+
+    expect(normalized.rejectedHits).toEqual([]);
+    expect(normalized.receipts[0]).toMatchObject({ sourcePath: "Vault/Timeline.md", excerpt: "MCP JSON excerpt", verified: false });
   });
 
   it("quarantines hits without usable source paths and deduplicates matching receipts", () => {
@@ -324,6 +350,27 @@ describe("mineCounterLawsuitVaultSources", () => {
     expect(result.status).toBe("unavailable");
     expect(result.providerDiagnostics.some((diagnostic) => diagnostic.status === "error")).toBe(true);
     expect(result.providerDiagnostics.some((diagnostic) => diagnostic.status === "unavailable")).toBe(true);
+  });
+
+  it("redacts token-like values from persisted provider error diagnostics", async () => {
+    class SecretFailingClient extends FakeMcpClient {
+      override async callTool(): Promise<unknown> {
+        throw new Error("provider failed with sk-secret-token-value-that-must-go");
+      }
+    }
+    const taskStore = new FakeTaskStore();
+    const result = await mineCounterLawsuitVaultSources({
+      taskStore: taskStore as never,
+      runId: "CLW-1",
+      request: { queries: ["Acme"] },
+      mcpClientFactory: async ({ provider }) => provider === "qmd"
+        ? { client: new SecretFailingClient("qmd-mcp", [{ name: "search" }], []), mcpServerName: "qmd-mcp" }
+        : null,
+      searchProjectMemoryFn: async () => [],
+    });
+
+    expect(JSON.stringify(result.providerDiagnostics)).not.toContain("sk-secret");
+    expect(JSON.stringify(taskStore.researchStore.runs[0].metadata)).not.toContain("sk-secret");
   });
 
   it("derives persisted vault-mining status from deterministic task documents", async () => {
