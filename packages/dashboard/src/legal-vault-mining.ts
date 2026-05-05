@@ -700,6 +700,15 @@ function persistResearchRun(params: {
     metadata: {
       workflowRunId: params.runId,
       providerDiagnostics: params.diagnostics,
+      mcpServerNames: params.diagnostics
+        .map((diagnostic) => diagnostic.mcpServerName)
+        .filter((name): name is string => typeof name === "string" && name.length > 0),
+      safetyGateReminders: [
+        "source/citation verification required",
+        "opposing-counsel red-team review required",
+        "lineage preservation required",
+        "qualified human legal review required",
+      ],
       safetyNotice: "Receipts are source-linked only; verified is false; no legal authority or citation validation has occurred.",
     },
     lifecycle: { maxAttempts: 1 },

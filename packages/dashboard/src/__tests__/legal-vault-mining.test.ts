@@ -312,6 +312,8 @@ describe("mineCounterLawsuitVaultSources", () => {
     expect(qmdClient.closed).toBe(true);
     expect(obsidianClient.closed).toBe(true);
     expect(taskStore.researchStore.runs).toHaveLength(1);
+    expect(taskStore.researchStore.runs[0].metadata?.mcpServerNames).toEqual(["qmd-mcp", "obsidian-vault"]);
+    expect(taskStore.researchStore.runs[0].metadata?.safetyGateReminders).toContain("source/citation verification required");
     const sources = taskStore.researchStore.runs[0].sources as ResearchSource[];
     expect(sources.map((source) => source.reference)).toEqual(["vault/qmd.md", "vault/obsidian.md"]);
     expect(JSON.stringify(sources)).not.toContain("Authorization: Bearer abcdefghijklmnop");
