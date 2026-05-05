@@ -346,6 +346,12 @@ describe("legal workflow routes", () => {
 
     const invalidTool = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/vault-mining`, JSON.stringify({ qmd: { searchToolName: "delete" } }), { "Content-Type": "application/json" });
     expect(invalidTool.status).toBe(400);
+
+    const invalidMaxQueries = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/vault-mining`, JSON.stringify({ maxQueries: 11 }), { "Content-Type": "application/json" });
+    expect(invalidMaxQueries.status).toBe(400);
+
+    const invalidMaxResults = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/vault-mining`, JSON.stringify({ maxResultsPerProvider: 21 }), { "Content-Type": "application/json" });
+    expect(invalidMaxResults.status).toBe(400);
   });
 
   it("GET derives status and artifact states from tasks with matching run provenance", async () => {
@@ -365,7 +371,7 @@ describe("legal workflow routes", () => {
     expect(body.artifacts[0]).toMatchObject({ id: "research-memo", status: "ready", taskId: "DEFAULT-001" });
     expect(body.artifacts[1]).toMatchObject({ id: "evidence-ledger", status: "generating", taskId: "DEFAULT-002" });
     expect(body.lineageDocuments[0]).toEqual({ taskId: "DEFAULT-001", documentKey: "counter-lawsuit-run", stage: "research-memo" });
-    expect(body.vaultMining).toMatchObject({ receiptsDocumentKey: "vault-mining-receipts" });
+    expect(body.vaultMining).toMatchObject({ runId, receiptsDocumentKey: "vault-mining-receipts" });
   });
 
   it("GET returns 404 for unknown run IDs", async () => {

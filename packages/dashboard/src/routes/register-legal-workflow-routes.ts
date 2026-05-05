@@ -70,9 +70,10 @@ function validateVaultMiningRunPayload(body: unknown): Partial<VaultMiningReques
       if (typeof query !== "string" || !query.trim()) throw badRequest("queries must contain only non-empty strings");
     }
   }
+  const maxBounds = { maxQueries: 10, maxResultsPerProvider: 20 } as const;
   for (const key of ["maxQueries", "maxResultsPerProvider"] as const) {
-    if (record[key] !== undefined && (typeof record[key] !== "number" || !Number.isInteger(record[key]) || record[key] < 1)) {
-      throw badRequest(`${key} must be a positive integer`);
+    if (record[key] !== undefined && (typeof record[key] !== "number" || !Number.isInteger(record[key]) || record[key] < 1 || record[key] > maxBounds[key])) {
+      throw badRequest(`${key} must be an integer between 1 and ${maxBounds[key]}`);
     }
   }
   return {

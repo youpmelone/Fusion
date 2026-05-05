@@ -150,7 +150,7 @@ describe("legal workflow vault-mining routes", () => {
 
     const status = await request(app, "GET", `/api/legal-workflows/counter-lawsuit/runs/${runId}`);
     expect(status.status).toBe(200);
-    expect((status.body as any).vaultMining).toMatchObject({ receiptCount: 2, researchRunId: "RR-2" });
+    expect((status.body as any).vaultMining).toMatchObject({ runId, receiptCount: 2, researchRunId: "RR-2" });
     expect(store.documents.some((doc) => doc.key === "vault-mining-receipts" && doc.content.includes("not legally verified"))).toBe(true);
   });
 
@@ -160,5 +160,8 @@ describe("legal workflow vault-mining routes", () => {
     const runId = (launch.body as any).runId;
     const response = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/vault-mining`, JSON.stringify({ qmd: { searchToolName: "delete" }, command: "not allowed" }), { "Content-Type": "application/json" });
     expect(response.status).toBe(400);
+
+    const maxResponse = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/vault-mining`, JSON.stringify({ maxResultsPerProvider: 21 }), { "Content-Type": "application/json" });
+    expect(maxResponse.status).toBe(400);
   });
 });

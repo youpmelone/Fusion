@@ -855,6 +855,7 @@ export async function deriveVaultMiningStatusForRun(params: {
   taskStore: Pick<TaskStore, "listTasks" | "getTaskDocument">;
   runId: string;
 }): Promise<{
+  runId: string;
   status: VaultMiningResult["status"] | "not-run";
   researchRunId?: string;
   receiptCount: number;
@@ -865,12 +866,12 @@ export async function deriveVaultMiningStatusForRun(params: {
   const tasks = (await params.taskStore.listTasks({ includeArchived: true } as never)).filter((task) => taskMatchesRun(task, params.runId));
   const researchMemoTask = findResearchMemoTask(tasks);
   if (!researchMemoTask) {
-    return { status: "not-run", receiptCount: 0, providerDiagnostics: [] };
+    return { runId: params.runId, status: "not-run", receiptCount: 0, providerDiagnostics: [] };
   }
   const doc = await params.taskStore.getTaskDocument(researchMemoTask.id, VAULT_MINING_RECEIPTS_DOCUMENT_KEY).catch(() => null);
   const statusDoc = await params.taskStore.getTaskDocument(researchMemoTask.id, VAULT_MINING_STATUS_DOCUMENT_KEY).catch(() => null);
   if (!doc) {
-    return { status: "not-run", receiptCount: 0, providerDiagnostics: [] };
+    return { runId: params.runId, status: "not-run", receiptCount: 0, providerDiagnostics: [] };
   }
   const metadata = doc.metadata ?? {};
   const receipts = Array.isArray(metadata.receipts) ? metadata.receipts as PersistedVaultMiningReceipt[] : [];
@@ -879,6 +880,7 @@ export async function deriveVaultMiningStatusForRun(params: {
     ? statusDoc.metadata.status as VaultMiningResult["status"]
     : resultStatus(providerDiagnostics, receipts.length);
   return {
+    runId: params.runId,
     status,
     researchRunId: typeof metadata.researchRunId === "string" ? metadata.researchRunId : undefined,
     receiptCount: receipts.length,
