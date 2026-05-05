@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { ensureTestArtifacts } from "./ensure-test-artifacts.mjs";
 
 const rootDir = process.env.FUSION_PROJECT_DIR
   ? path.resolve(process.env.FUSION_PROJECT_DIR)
@@ -447,6 +448,7 @@ export function main(argv = process.argv.slice(2)) {
   const forwardedArgs = argv.filter((arg) => arg !== "--full" && arg !== "--no-cache");
 
   run("pnpm", ["sync:fusion-skill:check"]);
+  ensureTestArtifacts(rootDir);
 
   const baseBranch = getBaseBranch();
   const comparisonBase = detectComparisonBase(baseBranch);

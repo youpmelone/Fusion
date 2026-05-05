@@ -25,6 +25,18 @@ export default defineConfig({
         find: /^@fusion-plugin-examples\/droid-runtime$/,
         replacement: resolve(__dirname, "../../plugins/fusion-plugin-droid-runtime/src/index.ts"),
       },
+      {
+        find: /^@fusion-plugin-examples\/hermes-runtime$/,
+        replacement: resolve(__dirname, "../../plugins/fusion-plugin-hermes-runtime/src/index.ts"),
+      },
+      {
+        find: /^@fusion-plugin-examples\/openclaw-runtime$/,
+        replacement: resolve(__dirname, "../../plugins/fusion-plugin-openclaw-runtime/src/index.ts"),
+      },
+      {
+        find: /^@fusion-plugin-examples\/paperclip-runtime$/,
+        replacement: resolve(__dirname, "../../plugins/fusion-plugin-paperclip-runtime/src/index.ts"),
+      },
       { find: /^@fusion\/test-utils$/, replacement: resolve(__dirname, "../core/src/__test-utils__/workspace.ts") },
     ],
   },

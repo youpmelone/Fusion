@@ -695,6 +695,30 @@ export type { ResolvedResearchSettings } from "./research-settings.js";
 
 export { TodoStore } from "./todo-store.js";
 export type { TodoStoreEvents } from "./todo-store.js";
+export { EvalLifecycleError, EvalStore } from "./eval-store.js";
+export type {
+  EvalRun,
+  EvalRunStatus,
+  EvalRunTrigger,
+  EvalRunWindow,
+  EvalRunCounts,
+  EvalRunEvent,
+  EvalRunCreateInput,
+  EvalRunUpdateInput,
+  EvalRunListOptions,
+  EvalTaskSnapshot,
+  EvalTaskResult,
+  EvalTaskResultCreateInput,
+  EvalTaskResultUpdateInput,
+  EvalTaskResultListOptions,
+  EvalCategoryScore,
+  EvalEvidenceReference,
+  EvalSignal,
+  EvalFollowUpSuggestion,
+  EvalProvenance,
+  EvalStoreEvents,
+} from "./eval-types.js";
+export { EVAL_RUN_STATUSES, EVAL_RUN_TRIGGERS, EVAL_SCORE_CATEGORIES } from "./eval-types.js";
 
 // ── Agent Companies Types ──────────────────────────────────
 

@@ -36,7 +36,7 @@ import { fetchScripts } from "../api";
 import type { PluginDashboardViewEntry } from "../api";
 import { useViewportMode } from "./Header";
 import type { TaskView } from "../hooks/useViewState";
-import { buildPluginTaskViewId } from "../plugins/pluginViewRegistry";
+import { buildPluginTaskViewId, isPluginViewId } from "../plugins/pluginViewRegistry";
 import { getPluginNavIcon } from "./pluginNavIcon";
 
 export interface MobileNavBarProps {
@@ -249,7 +249,7 @@ export function MobileNavBar({
     || (todosOpen && todoViewEnabled)
     || (view === "roadmaps" && !showRoadmapsTopLevel)
     || (view === "skills" && !showSkillsTopLevel)
-    || (view.startsWith("plugin:") && !topLevelPrimaryPluginViews.some((entry) => buildPluginTaskViewId(entry.pluginId, entry.view.viewId) === view));
+    || (isPluginViewId(view) && !topLevelPrimaryPluginViews.some((entry) => buildPluginTaskViewId(entry.pluginId, entry.view.viewId) === view));
 
   return (
     <>

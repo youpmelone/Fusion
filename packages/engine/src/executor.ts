@@ -603,10 +603,8 @@ export class TaskExecutor {
   private completedTaskWatchdogs = new Map<string, ReturnType<typeof setTimeout>>();
   /** One-shot watchdogs for workflow reruns that should have bounced back to in-progress. */
   private workflowRerunWatchdogs = new Map<string, ReturnType<typeof setTimeout>>();
-  /** Set of ephemeral spawned agent IDs with scheduled cleanup (prevents duplicate deletion attempts). */
+  /** Set of ephemeral spawned agent IDs with in-flight cleanup (prevents duplicate deletion attempts). */
   private pendingEphemeralDeletions = new Set<string>();
-  /** Map of spawned agent IDs to scheduled cleanup timer handles for shutdown disposal. */
-  private ephemeralCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   private async finalizeAlreadyReviewedTask(taskId: string): Promise<"merged" | "blocked" | "missing"> {
     const latestTask = await this.store.getTask(taskId);
@@ -736,15 +734,7 @@ export class TaskExecutor {
   }
 
   disposeEphemeralTimers(): void {
-    const timerCount = this.ephemeralCleanupTimers.size;
-    for (const timerId of this.ephemeralCleanupTimers.values()) {
-      clearTimeout(timerId);
-    }
-    this.ephemeralCleanupTimers.clear();
     this.pendingEphemeralDeletions.clear();
-    if (timerCount > 0) {
-      executorLog.log(`Cleared ${timerCount} pending spawned-agent cleanup timer(s)`);
-    }
   }
 
   private isBenignEphemeralDeleteRaceError(agentId: string, err: unknown): boolean {
@@ -6656,23 +6646,17 @@ and show an appropriate message to the user.\`
       executorLog.warn(`Failed to update spawned child ${childId} state to 'terminated' during cleanup: ${msg}`);
     }
 
-    // Auto-delete the child agent after a short delay so the UI can observe
-    // the terminal state before the agent is removed.
     this.pendingEphemeralDeletions.add(childId);
-    const timerId = setTimeout(async () => {
-      this.ephemeralCleanupTimers.delete(childId);
-      this.pendingEphemeralDeletions.delete(childId);
-      try {
-        await this.options.agentStore?.deleteAgent(childId);
-      } catch (err: unknown) {
-        if (this.isBenignEphemeralDeleteRaceError(childId, err)) {
-          return;
-        }
+    try {
+      await this.options.agentStore?.deleteAgent(childId);
+    } catch (err: unknown) {
+      if (!this.isBenignEphemeralDeleteRaceError(childId, err)) {
         const msg = err instanceof Error ? err.message : String(err);
         executorLog.warn(`Failed to delete spawned agent ${childId}: ${msg}`);
       }
-    }, 5000);
-    this.ephemeralCleanupTimers.set(childId, timerId);
+    } finally {
+      this.pendingEphemeralDeletions.delete(childId);
+    }
 
     this.totalSpawnedCount = Math.max(0, this.totalSpawnedCount - 1);
   }
@@ -6906,6 +6890,21 @@ function scopePromptToWorktree(prompt: string, rootDir?: string, worktreePath?: 
     .replaceAll(`${worktreePath}/.fusion/`, `${rootDir}/.fusion/`);
 }
 
+function buildSourceIssueRef(sourceIssue: TaskDetail["sourceIssue"]): string {
+  if (!sourceIssue || sourceIssue.provider !== "github" || !sourceIssue.repository) {
+    return "";
+  }
+
+  const issueNumber = sourceIssue.issueNumber
+    ?? Number.parseInt(sourceIssue.externalIssueId ?? "", 10);
+
+  if (!Number.isInteger(issueNumber) || issueNumber < 1) {
+    return "";
+  }
+
+  return `${sourceIssue.repository}#${issueNumber}`;
+}
+
 export function buildExecutionPrompt(task: TaskDetail, rootDir?: string, settings?: Settings, worktreePath?: string): string {
   const prompt = scopePromptToWorktree(task.prompt, rootDir, worktreePath);
   const reviewMatch = prompt.match(/##\s*Review Level[:\s]*(\d)/);
@@ -6916,9 +6915,7 @@ export function buildExecutionPrompt(task: TaskDetail, rootDir?: string, setting
     ? ` --author="${settings?.commitAuthorName || "Fusion"} <${settings?.commitAuthorEmail || "noreply@runfusion.ai"}>"`
     : "";
 
-  const sourceIssueRef = task.sourceIssue?.provider === "github" && task.sourceIssue.repository && task.sourceIssue.issueNumber
-    ? `${task.sourceIssue.repository}#${task.sourceIssue.issueNumber}`
-    : "";
+  const sourceIssueRef = buildSourceIssueRef(task.sourceIssue);
 
   // Build step progress for resume
   const hasProgress = task.steps.length > 0 && task.steps.some((s) => s.status !== "pending");

@@ -1611,6 +1611,7 @@ async function continueAgentConversation(session: Session, message: string): Pro
 
       if (parsed.type === "question") {
         session.currentQuestion = parsed.data;
+        session.summary = undefined;
         session.error = undefined;
         session.lastGeneratedThinking = session.thinkingOutput;
         session.updatedAt = new Date();
@@ -1835,6 +1836,20 @@ export function parseAgentResponse(text: string): PlanningResponse {
  * Submit a response to the current question and get the next question or summary.
  * Supports both stubbed mode and AI agent mode.
  */
+function isRefineRequest(responses: Record<string, unknown>): boolean {
+  return responses.refine === true;
+}
+
+function formatRefineRequestForAgent(summary: PlanningSummary): string {
+  return [
+    "The user clicked Refine Further on the planning summary.",
+    "Continue the planning interview from the existing context.",
+    "Either ask one focused follow-up question or return an updated completion summary if sufficient.",
+    "Current summary:",
+    JSON.stringify(summary),
+  ].join("\n\n");
+}
+
 export async function submitResponse(
   sessionId: string,
   responses: Record<string, unknown>,
@@ -1847,25 +1862,34 @@ export async function submitResponse(
   }
 
   if (!session.currentQuestion) {
-    throw new InvalidSessionStateError("No active question in session");
+    if (!isRefineRequest(responses) || !session.summary) {
+      throw new InvalidSessionStateError("No active question in session");
+    }
+
+    session.error = undefined;
+    persistSession(session, "generating");
+
+    await ensureSessionAgent(session, rootDir, session.history, promptOverrides);
+    const refineMessage = formatRefineRequestForAgent(session.summary);
+    await continueAgentConversation(session, refineMessage);
+  } else {
+    // Record the response
+    session.history.push({
+      question: session.currentQuestion,
+      response: responses,
+      thinkingOutput: session.lastGeneratedThinking || "",
+    });
+    session.error = undefined;
+    persistSession(session, "generating");
+
+    if (!session.agent) {
+      const replayHistory = session.history.slice(0, -1);
+      await ensureSessionAgent(session, rootDir, replayHistory, promptOverrides);
+    }
+
+    const message = formatResponseForAgent(session.currentQuestion, responses);
+    await continueAgentConversation(session, message);
   }
-
-  // Record the response
-  session.history.push({
-    question: session.currentQuestion,
-    response: responses,
-    thinkingOutput: session.lastGeneratedThinking || "",
-  });
-  session.error = undefined;
-  persistSession(session, "generating");
-
-  if (!session.agent) {
-    const replayHistory = session.history.slice(0, -1);
-    await ensureSessionAgent(session, rootDir, replayHistory, promptOverrides);
-  }
-
-  const message = formatResponseForAgent(session.currentQuestion, responses);
-  await continueAgentConversation(session, message);
 
   // Return the current state (will be updated via SSE)
   if (session.summary) {

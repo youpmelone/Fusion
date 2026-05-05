@@ -19,7 +19,7 @@ function parsePositiveInt(value: string | undefined): number | undefined {
 //      fan-out instead of multiplying per package.
 //   3. defaultCap — small ceiling (2 by default) so a single package run on a
 //      high-core machine stays gentle.
-// All paths clamp to (cpus - 1) so we never oversubscribe.
+// All paths clamp to (cpus - 1) so we never oversubscribe the host.
 export function computeMaxWorkers(options: ComputeMaxWorkersOptions = {}): number {
   const { defaultCap = 2 } = options;
 
@@ -31,14 +31,7 @@ export function computeMaxWorkers(options: ComputeMaxWorkersOptions = {}): numbe
 
   let workers: number;
   if (explicit !== undefined) {
-    // In recursive workspace runs we provide a global worker budget via
-    // FUSION_TEST_TOTAL_WORKERS/FUSION_TEST_CONCURRENCY. Clamp explicit
-    // VITEST_MAX_WORKERS to that per-package share so `VITEST_MAX_WORKERS=4`
-    // at the workspace root doesn't fan out to 4 workers in every package.
-    const workspaceBudget = totalBudget !== undefined
-      ? Math.max(1, Math.floor(totalBudget / concurrency))
-      : undefined;
-    workers = workspaceBudget !== undefined ? Math.min(explicit, workspaceBudget) : explicit;
+    workers = explicit;
   } else if (totalBudget !== undefined) {
     workers = Math.max(1, Math.floor(totalBudget / concurrency));
   } else {

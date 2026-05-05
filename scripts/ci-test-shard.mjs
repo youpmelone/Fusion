@@ -3,6 +3,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureTestArtifacts } from "./ensure-test-artifacts.mjs";
 
 const DEFAULT_TEST_PACKAGES = [
   "@fusion/core",
@@ -74,6 +75,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
   };
 
   run("pnpm", ["sync:fusion-skill:check"], { env: shardEnv });
+  ensureTestArtifacts(process.cwd());
   const filters = shardPackages.flatMap((pkg) => ["--filter", pkg]);
   run("pnpm", [...filters, "test"], { env: shardEnv });
 }

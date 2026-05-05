@@ -5362,38 +5362,62 @@ describe("aiMergeTask — merge details collection", () => {
     expect(mergeDetailsCall?.[1].mergeDetails.mergeCommitMessage).toBe("- feat: something");
   });
 
-  it("stores partial mergeDetails when branch is not found", async () => {
+  it("recovers owned landed commit when branch is not found", async () => {
     const store = createMockStore(
-      { id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050" },
-      [{ id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050", column: "in-review" } as Task],
+      {
+        id: "FN-3469",
+        worktree: "/tmp/root/.worktrees/FN-3469",
+        baseCommitSha: "base3469",
+        mergeDetails: { commitSha: "a47b1e5d78d626f8b480f1e90d3d64be2625ff6a" } as any,
+      },
+      [{ id: "FN-3469", worktree: "/tmp/root/.worktrees/FN-3469", column: "in-review" } as Task],
     );
 
     mockedExecSync.mockImplementation((cmd: any) => {
       const cmdStr = String(cmd);
-      // Branch verification fails → branch not found
       if (cmdStr.includes("rev-parse --verify")) throw new Error("not found");
-      // But rev-parse HEAD still works → can capture commitSha (encoding: utf-8 → string)
-      if (cmdStr === "git rev-parse HEAD" || cmdStr.startsWith("git rev-parse HEAD "))
-        return "existingheadsha999";
+      if (cmdStr.includes("merge-base --is-ancestor a47b1e5d78d626f8b480f1e90d3d64be2625ff6a HEAD")) return Buffer.from("");
+      if (cmdStr.includes("log -1 --format=%H%x1f%s%x1f%b a47b1e5d78d626f8b480f1e90d3d64be2625ff6a")) {
+        return "a47b1e5d78d626f8b480f1e90d3d64be2625ff6a\u001ffix(FN-3469): title\u001fFusion-Task-Id: FN-3469" as any;
+      }
+      if (cmdStr.includes("show --shortstat --format= a47b1e5d78d626f8b480f1e90d3d64be2625ff6a")) {
+        return "2 files changed, 84 insertions(+), 2 deletions(-)" as any;
+      }
       return Buffer.from("");
     });
 
-    const result = await aiMergeTask(store, "/tmp/root", "FN-050");
-
+    const result = await aiMergeTask(store, "/tmp/root", "FN-3469");
     expect(result.merged).toBe(false);
-    expect(result.error).toContain("not found");
 
-    // Find the updateTask call that set mergeDetails
-    const updateCalls = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls;
-    const mergeDetailsCall = updateCalls.find(
+    const mergeDetailsCall = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls.find(
       (call: any[]) => call[1]?.mergeDetails !== undefined,
     );
-    expect(mergeDetailsCall).toBeDefined();
+    expect(mergeDetailsCall?.[1].mergeDetails).toEqual(expect.objectContaining({
+      commitSha: "a47b1e5d78d626f8b480f1e90d3d64be2625ff6a",
+      mergeCommitMessage: "fix(FN-3469): title",
+      mergeConfirmed: true,
+    }));
+  });
 
-    const mergeDetails = mergeDetailsCall![1].mergeDetails;
-    expect(mergeDetails.commitSha).toBe("existingheadsha999");
-    expect(mergeDetails.mergedAt).toBeDefined();
-    expect(mergeDetails.mergeConfirmed).toBe(false);
+  it("does not persist misleading mergeDetails when branch is not found and no owned commit exists", async () => {
+    const store = createMockStore(
+      { id: "FN-3373", worktree: "/tmp/root/.worktrees/FN-3373" },
+      [{ id: "FN-3373", worktree: "/tmp/root/.worktrees/FN-3373", column: "in-review" } as Task],
+    );
+
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.includes("rev-parse --verify")) throw new Error("not found");
+      return Buffer.from("");
+    });
+
+    const result = await aiMergeTask(store, "/tmp/root", "FN-3373");
+    expect(result.merged).toBe(false);
+
+    const mergeDetailsCall = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls.find(
+      (call: any[]) => call[1]?.mergeDetails !== undefined,
+    );
+    expect(mergeDetailsCall).toBeUndefined();
   });
 
   it("completes merge even when git commands fail during merge details collection", async () => {
@@ -5582,6 +5606,15 @@ describe("buildSourceIssueRef", () => {
     })).toBe("runfusion/fusion#123");
   });
 
+  it("falls back to externalIssueId when issueNumber is missing", async () => {
+    const { buildSourceIssueRef } = await import("../merger.js");
+    expect(buildSourceIssueRef({
+      provider: "github",
+      repository: "runfusion/fusion",
+      externalIssueId: "321",
+    } as any)).toBe("runfusion/fusion#321");
+  });
+
   it("returns empty string for non-GitHub providers", async () => {
     const { buildSourceIssueRef } = await import("../merger.js");
     expect(buildSourceIssueRef({
@@ -5596,6 +5629,11 @@ describe("buildSourceIssueRef", () => {
     const { buildSourceIssueRef } = await import("../merger.js");
     expect(buildSourceIssueRef(undefined)).toBe("");
     expect(buildSourceIssueRef(null)).toBe("");
+    expect(buildSourceIssueRef({
+      provider: "github",
+      repository: "runfusion/fusion",
+      externalIssueId: "not-a-number",
+    } as any)).toBe("");
   });
 });
 

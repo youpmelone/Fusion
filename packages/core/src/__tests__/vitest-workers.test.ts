@@ -4,6 +4,10 @@ import { computeMaxWorkers } from "../__test-utils__/vitest-workers";
 
 const ORIGINAL_ENV = { ...process.env };
 
+function cpuCap(): number {
+  return Math.max(1, cpus().length - 1);
+}
+
 describe("computeMaxWorkers", () => {
   afterEach(() => {
     process.env = { ...ORIGINAL_ENV };
@@ -15,21 +19,20 @@ describe("computeMaxWorkers", () => {
     delete process.env.FUSION_TEST_CONCURRENCY;
 
     const workers = computeMaxWorkers({ defaultCap: 2 });
-    const cpuCap = Math.max(1, cpus().length - 1);
 
-    expect(workers).toBe(Math.min(4, cpuCap));
+    expect(workers).toBe(Math.min(4, cpuCap()));
     expect(process.env.VITEST_MAX_WORKERS).toBe(String(workers));
   });
 
-  it("clamps explicit VITEST_MAX_WORKERS to workspace per-package budget", () => {
+  it("lets explicit VITEST_MAX_WORKERS override the workspace per-package budget", () => {
     process.env.VITEST_MAX_WORKERS = "4";
     process.env.FUSION_TEST_TOTAL_WORKERS = "4";
     process.env.FUSION_TEST_CONCURRENCY = "2";
 
     const workers = computeMaxWorkers({ defaultCap: 2 });
 
-    expect(workers).toBe(2);
-    expect(process.env.VITEST_MAX_WORKERS).toBe("2");
+    expect(workers).toBe(Math.min(4, cpuCap()));
+    expect(process.env.VITEST_MAX_WORKERS).toBe(String(workers));
   });
 
   it("still derives workers from workspace budget when explicit override is absent", () => {
@@ -39,8 +42,8 @@ describe("computeMaxWorkers", () => {
 
     const workers = computeMaxWorkers({ defaultCap: 2 });
 
-    expect(workers).toBe(3);
-    expect(process.env.VITEST_MAX_WORKERS).toBe("3");
+    expect(workers).toBe(Math.min(3, cpuCap()));
+    expect(process.env.VITEST_MAX_WORKERS).toBe(String(workers));
   });
 
   it("ignores invalid env values and falls back to default cap", () => {
@@ -50,7 +53,7 @@ describe("computeMaxWorkers", () => {
 
     const workers = computeMaxWorkers({ defaultCap: 2 });
 
-    expect(workers).toBe(2);
-    expect(process.env.VITEST_MAX_WORKERS).toBe("2");
+    expect(workers).toBe(Math.min(2, cpuCap()));
+    expect(process.env.VITEST_MAX_WORKERS).toBe(String(workers));
   });
 });

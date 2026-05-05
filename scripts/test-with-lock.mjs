@@ -154,11 +154,13 @@ for (const sig of ["exit", "SIGINT", "SIGTERM", "SIGHUP"]) {
 
 await acquireWithWait();
 
-// Forward all argv after the script name to `pnpm test:full`.
+// Forward all argv after the script name to the raw full-suite command.
+// `pnpm test:full` itself points at this lock wrapper, so the unlocked
+// implementation lives behind `test:full:raw` to avoid recursive spawning.
 const extraArgs = process.argv.slice(2);
 const child = spawn(
   "pnpm",
-  ["test:full", ...extraArgs],
+  ["test:full:raw", ...extraArgs],
   { stdio: "inherit", shell: false },
 );
 

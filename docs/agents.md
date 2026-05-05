@@ -97,6 +97,16 @@ Fallback behavior remains unchanged:
 
 Execution-ownership sync intentionally avoids assignment-trigger side effects (`agent:assigned` wakeups) that are intended for control-plane delegation.
 
+### Ephemeral agent terminal cleanup
+
+Runtime-created ephemeral agents are removed immediately after terminal cleanup paths run:
+
+- Task-worker agents created by `InProcessRuntime` are deleted as soon as they reach `terminated` through completion, error, or `agent:stateChanged` fallback cleanup.
+- Spawned child agents created by `TaskExecutor` are deleted immediately inside `terminateChildAgent()` after terminal state update.
+- User-managed non-ephemeral agents are never auto-deleted by these pathways.
+
+Because deletion is immediate, terminated runtime helper agents should not remain visible in the dashboard or `AgentStore` after cleanup completes.
+
 ## Agents View (Dashboard)
 
 The agents surface provides:
@@ -106,6 +116,7 @@ The agents surface provides:
 - Org chart nodes intentionally stay compact (role/state/health hierarchy signal only) and do not enumerate per-agent skill badges; detailed skills remain in list/board/detail surfaces
 - A cross-pane **Overview** strip above the split layout with summary metrics and a disclosure to expand active/running live cards
 - A compact **Controls** popup for secondary actions (state filter, Show system agents toggle, Import, and global Heartbeat Speed)
+- Agent import can also be launched from the selected **Agent Detail** header; this entry opens the import modal directly in the companies.sh browse flow so operators can discover and import packages without leaving the detail context
 - Detail/config panels
 - Split-view synchronization: successful saves and lifecycle actions from the right-side Agent Detail pane immediately refresh the left-side list/selection state (no wait for background polling)
 - A per-agent **Token Usage** panel that summarizes cumulative token consumption for the currently displayed agents

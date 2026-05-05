@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { builtinModules } from "node:module";
 import { parse } from "yaml";
@@ -20,6 +20,10 @@ function loadWorkflowYaml(name: string): any {
 function loadRootPackageJson(): any {
   const path = join(workspaceRoot, "package.json");
   return JSON.parse(readFileSync(path, "utf-8"));
+}
+
+function readWorkspaceFile(...segments: string[]): string {
+  return readFileSync(join(workspaceRoot, ...segments), "utf-8");
 }
 
 describe("CLI package.json publishing config", () => {
@@ -214,9 +218,38 @@ describe("Workspace bootstrap script contract", () => {
 
   it("makes root test changed-only while keeping explicit full-suite and CI-shard commands", () => {
     expect(rootPkg.scripts?.test).toBe("node scripts/test-changed.mjs");
-    expect(rootPkg.scripts?.["test:full"]).toContain("pnpm -r --workspace-concurrency=2 test");
-    expect(rootPkg.scripts?.["test:full"]).not.toContain("pnpm build");
+    expect(rootPkg.scripts?.["test:full"]).toBe("node scripts/test-with-lock.mjs");
+    expect(rootPkg.scripts?.["test:full:raw"]).toBe("node scripts/test-full-raw.mjs");
+    expect(rootPkg.scripts?.["test:full:raw"]).not.toContain("pnpm build");
     expect(rootPkg.scripts?.["test:ci:shard"]).toBe("node scripts/ci-test-shard.mjs");
+  });
+
+  it("caps worker fan-out in every Vitest package config that participates in test:full", () => {
+    const packageRoots = ["packages", "plugins"].flatMap((root) => {
+      const rootPath = join(workspaceRoot, root);
+      if (!existsSync(rootPath)) return [];
+
+      return readdirSync(rootPath)
+        .map((entry) => [root, entry])
+        .filter(([parent, entry]) => {
+          const packagePath = join(workspaceRoot, parent, entry, "package.json");
+          const configPath = join(workspaceRoot, parent, entry, "vitest.config.ts");
+          if (!existsSync(packagePath) || !existsSync(configPath)) return false;
+
+          const pkg = JSON.parse(readFileSync(packagePath, "utf-8"));
+          return typeof pkg.scripts?.test === "string" && pkg.scripts.test.includes("vitest");
+        });
+    });
+
+    expect(packageRoots.length).toBeGreaterThan(0);
+
+    for (const configPath of packageRoots) {
+      const config = readWorkspaceFile(...configPath, "vitest.config.ts");
+      expect(config, configPath.join("/")).toContain("computeMaxWorkers");
+      expect(config, configPath.join("/")).toContain("const maxWorkers = computeMaxWorkers");
+      expect(config, configPath.join("/")).toContain("maxWorkers");
+      expect(config, configPath.join("/")).toContain("poolOptions");
+    }
   });
 
   it("defines verify:workspace in lint -> test:full -> build order", () => {

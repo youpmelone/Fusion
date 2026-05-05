@@ -1307,6 +1307,33 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     [projectId, sessionTabId, view]
   );
 
+  const handleRefineFurther = useCallback(async () => {
+    if (view.type !== "summary") {
+      return;
+    }
+
+    const { session, summary } = view;
+    const sessionId = session.sessionId;
+    currentSessionIdRef.current = sessionId;
+    setLockSessionId(sessionId);
+
+    setError(null);
+    setIsRetrying(false);
+    setStreamingOutput("");
+    setView({ type: "loading" });
+
+    connectToPlanningStream(sessionId);
+
+    try {
+      await respondToPlanning(sessionId, { refine: true }, projectId, sessionTabId);
+    } catch (err) {
+      streamConnectionRef.current?.close();
+      streamConnectionRef.current = null;
+      setError(getErrorMessage(err) || "Failed to refine plan");
+      setView({ type: "summary", session, summary: editedSummary ?? summary });
+    }
+  }, [connectToPlanningStream, editedSummary, projectId, sessionTabId, view]);
+
   const handleStopGeneration = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;
     if (!sessionId) {
@@ -1935,8 +1962,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
               onCreateTask={handleCreateTask}
               onBreakIntoTasks={handleStartBreakdown}
               onRefine={() => {
-                // Reset to question mode for more refinement
-                setView({ type: "question", session: view.session });
+                void handleRefineFurther();
               }}
               isLoading={false}
             />

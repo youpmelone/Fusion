@@ -809,6 +809,84 @@ describe("PlanningModeModal", () => {
         expect(mockCreateTaskFromPlanning).toHaveBeenCalledWith("session-complete-2", resumedSummary, undefined);
       });
     });
+
+    it("refines a resumed complete session without blank question view", async () => {
+      const resumedSummary: PlanningSummary = {
+        title: "Resume-and-refine",
+        description: "Recovered summary for refine",
+        suggestedSize: "M",
+        suggestedDependencies: [],
+        keyDeliverables: ["Implement", "Verify"],
+      };
+      const refinedQuestion: PlanningQuestion = {
+        id: "q-refine",
+        type: "text",
+        question: "Which part should we refine?",
+        description: "Refine follow-up",
+      };
+
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: "session-complete-refine",
+        type: "planning",
+        status: "complete",
+        title: "Resume-and-refine",
+        inputPayload: JSON.stringify({ initialPlan: "Recover and refine" }),
+        conversationHistory: "[]",
+        currentQuestion: null,
+        result: JSON.stringify(resumedSummary),
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      let streamHandlers: any;
+      mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        streamHandlers = handlers;
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+      mockRespondToPlanning.mockImplementationOnce(async () => {
+        setTimeout(() => {
+          streamHandlers?.onQuestion?.(refinedQuestion);
+        }, 10);
+        return { type: "question", data: refinedQuestion };
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId="session-complete-refine"
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Refine Further" })).toBeDefined();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Refine Further" }));
+
+      await waitFor(() => {
+        expect(mockRespondToPlanning).toHaveBeenCalledWith(
+          "session-complete-refine",
+          { refine: true },
+          undefined,
+          expect.any(String),
+        );
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Which part should we refine?")).toBeDefined();
+      });
+      expect(screen.queryByText("No active question in session")).toBeNull();
+    });
   });
 
   describe("Conversation history", () => {
@@ -1094,7 +1172,7 @@ describe("PlanningModeModal", () => {
 
       await waitFor(() => {
         expect(screen.getByText("What are the key requirements?")).toBeDefined();
-      });
+      }, { timeout: 5000 });
 
       expect(screen.getByTestId("conversation-history")).toBeDefined();
       expect(screen.getByText("What is the scope?")).toBeDefined();

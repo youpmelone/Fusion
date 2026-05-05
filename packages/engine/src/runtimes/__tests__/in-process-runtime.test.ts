@@ -746,7 +746,7 @@ describe("InProcessRuntime", () => {
       }
     }, 30000);
 
-    it("auto-deletes task-worker agent on task completion after 5 second delay", async () => {
+    it("auto-deletes task-worker agent on task completion immediately", async () => {
       vi.useFakeTimers();
 
       try {
@@ -773,14 +773,9 @@ describe("InProcessRuntime", () => {
         deleteAgentSpy.mockClear();
         executorOptions.onComplete?.({ id: "FN-AUTO1" } as Task);
 
-        // Verify deleteAgent was not called immediately (before 5 seconds)
-        expect(deleteAgentSpy).not.toHaveBeenCalled();
-
-        // Advance timers by 5 seconds
-        await vi.advanceTimersByTimeAsync(5000);
-
-        // Now deleteAgent should have been called
-        expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
+        await vi.waitFor(() => {
+          expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
+        });
       } finally {
         vi.useRealTimers();
       }
@@ -819,7 +814,7 @@ describe("InProcessRuntime", () => {
       }
     }, 30000);
 
-    it("auto-deletes task-worker agent on task error after 5 second delay", async () => {
+    it("auto-deletes task-worker agent on task error immediately", async () => {
       vi.useFakeTimers();
 
       try {
@@ -848,14 +843,9 @@ describe("InProcessRuntime", () => {
         deleteAgentSpy.mockClear();
         executorOptions.onError?.({ id: "FN-AUTO2" } as Task, new Error("Task failed"));
 
-        // Verify deleteAgent was not called immediately (before 5 seconds)
-        expect(deleteAgentSpy).not.toHaveBeenCalled();
-
-        // Advance timers by 5 seconds
-        await vi.advanceTimersByTimeAsync(5000);
-
-        // Now deleteAgent should have been called
-        expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
+        await vi.waitFor(() => {
+          expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
+        });
       } finally {
         vi.useRealTimers();
       }
@@ -1274,14 +1264,9 @@ describe("InProcessRuntime", () => {
         // Wait for async handler
         await vi.advanceTimersByTimeAsync(0);
 
-        // Verify deleteAgent was NOT called immediately (needs 5s delay)
-        expect(deleteAgentSpy).not.toHaveBeenCalled();
-
-        // Advance timers by 5 seconds
-        await vi.advanceTimersByTimeAsync(5000);
-
-        // Now deleteAgent should have been called
-        expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
+        await vi.waitFor(() => {
+          expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
+        });
         expect(deleteAgentSpy).toHaveBeenCalledWith(agent.id);
 
         // Note: We verified deleteAgent was called, which is the key behavior.
@@ -1318,8 +1303,7 @@ describe("InProcessRuntime", () => {
         // Wait for async handler
         await vi.advanceTimersByTimeAsync(0);
 
-        // Advance timers to ensure cleanup would have run
-        await vi.advanceTimersByTimeAsync(5000);
+        await vi.advanceTimersByTimeAsync(0);
 
         // deleteAgent should NOT have been called for non-ephemeral agent
         expect(deleteAgentSpy).not.toHaveBeenCalled();
@@ -1360,11 +1344,9 @@ describe("InProcessRuntime", () => {
         // Wait for async handlers
         await vi.advanceTimersByTimeAsync(0);
 
-        // Advance timers by 5 seconds
-        await vi.advanceTimersByTimeAsync(5000);
-
-        // deleteAgent should have been called only once (deduplicated)
-        expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
+        await vi.waitFor(() => {
+          expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
+        });
         expect(deleteAgentSpy).toHaveBeenCalledWith(agent.id);
       } finally {
         vi.useRealTimers();
@@ -1397,9 +1379,8 @@ describe("InProcessRuntime", () => {
         // Emit termination event
         store.emit("agent:stateChanged", agent.id, "running", "terminated");
 
-        // Wait for async handler, then fire delayed cleanup
+        // Wait for async handler
         await vi.advanceTimersByTimeAsync(0);
-        await vi.advanceTimersByTimeAsync(5000);
 
         // Cleanup should still be attempted
         expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
@@ -1442,8 +1423,7 @@ describe("InProcessRuntime", () => {
         // Wait for async handler
         await vi.advanceTimersByTimeAsync(0);
 
-        // Advance timers to trigger deletion
-        await vi.advanceTimersByTimeAsync(5000);
+        await vi.advanceTimersByTimeAsync(0);
 
         // Should have attempted deletion
         expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
@@ -1462,7 +1442,7 @@ describe("InProcessRuntime", () => {
       }
     }, 30000);
 
-    it("clears pending timers on runtime stop", async () => {
+    it("handles runtime stop racing with in-flight cleanup", async () => {
       vi.useFakeTimers();
 
       try {
@@ -1487,14 +1467,9 @@ describe("InProcessRuntime", () => {
         // Wait for async handler
         await vi.advanceTimersByTimeAsync(0);
 
-        // Stop runtime before timer fires
         await runtime.stop();
 
-        // Advance timers - deletion should NOT happen because timer was cleared
-        await vi.advanceTimersByTimeAsync(5000);
-
-        // deleteAgent should NOT have been called (timer was cleared)
-        expect(deleteAgentSpy).not.toHaveBeenCalled();
+        expect(deleteAgentSpy.mock.calls.length).toBeLessThanOrEqual(1);
       } finally {
         vi.useRealTimers();
       }
@@ -1527,10 +1502,11 @@ describe("InProcessRuntime", () => {
         await vi.advanceTimersByTimeAsync(0);
 
         // Advance timers by 5 seconds
-        await vi.advanceTimersByTimeAsync(5000);
+        await vi.waitFor(() => {
+          expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
+        });
 
         // deleteAgent should have been called for spawned ephemeral agent
-        expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
         expect(deleteAgentSpy).toHaveBeenCalledWith(agent.id);
       } finally {
         vi.useRealTimers();
@@ -1560,14 +1536,15 @@ describe("InProcessRuntime", () => {
         executorOptions.onComplete?.({ id: "FN-DUP-COMPLETE" } as Task);
         store.emit("agent:stateChanged", worker!.id, "running", "terminated");
 
-        await vi.advanceTimersByTimeAsync(5000);
-        expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
+        await vi.waitFor(() => {
+          expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
+        });
       } finally {
         vi.useRealTimers();
       }
     }, 30000);
 
-    it("clears onComplete cleanup timer on stop", async () => {
+    it("handles onComplete cleanup racing with runtime stop", async () => {
       vi.useFakeTimers();
       try {
         await runtime.start();
@@ -1582,8 +1559,7 @@ describe("InProcessRuntime", () => {
         executorOptions.onComplete?.({ id: "FN-STOP-COMPLETE" } as Task);
 
         await runtime.stop();
-        await vi.advanceTimersByTimeAsync(5000);
-        expect(deleteAgentSpy).not.toHaveBeenCalled();
+        expect(deleteAgentSpy.mock.calls.length).toBeLessThanOrEqual(1);
       } finally {
         vi.useRealTimers();
       }

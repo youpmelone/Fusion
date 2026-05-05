@@ -36,7 +36,7 @@ import { useCurrentProject } from "./hooks/useCurrentProject";
 import { ToastProvider, useToast } from "./hooks/useToast";
 import { ConfirmDialogProvider } from "./hooks/useConfirm";
 import { useTheme } from "./hooks/useTheme";
-import { useModalManager, type DetailTaskOrigin } from "./hooks/useModalManager";
+import { useModalManager, type DetailTaskOrigin, type DetailTaskTab } from "./hooks/useModalManager";
 import { useAppSettings } from "./hooks/useAppSettings";
 import { useDeepLink } from "./hooks/useDeepLink";
 import { useFavorites } from "./hooks/useFavorites";
@@ -49,6 +49,7 @@ import { useViewState, type TaskView } from "./hooks/useViewState";
 import { useNavigationHistory } from "./hooks/useNavigationHistory";
 import { usePluginDashboardViews } from "./hooks/usePluginDashboardViews";
 import { PluginDashboardViewHost } from "./plugins/PluginDashboardViewHost";
+import { isPluginViewId } from "./plugins/pluginViewRegistry";
 import { useProjectActions } from "./hooks/useProjectActions";
 import { useTaskHandlers } from "./hooks/useTaskHandlers";
 import { useRemoteNodeData } from "./hooks/useRemoteNodeData";
@@ -450,6 +451,7 @@ function AppInner() {
   // Redirect to board if feature-gated views are disabled.
   useEffect(() => {
     if (!settingsLoaded) return;
+    if (isPluginViewId(taskView)) return;
     if (taskView === "skills" && !skillsEnabled) {
       handleChangeTaskView("board");
     }
@@ -869,7 +871,7 @@ function AppInner() {
     }
 
     // Project view
-    if (taskView.startsWith("plugin:")) {
+    if (isPluginViewId(taskView)) {
       return (
         <PageErrorBoundary>
           <PluginDashboardViewHost
@@ -878,8 +880,10 @@ function AppInner() {
               projectId: currentProject?.id,
               tasks: isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks,
               workflowSteps,
-              openTaskDetail: isMobile ? (task, initialTab) => openDetailTaskWithHistory(task, initialTab) : (task, initialTab) => modalManager.openDetailTask(task, initialTab),
-              renderTaskCard: (task) => (
+              openTaskDetail: isMobile
+                ? (task: Task | TaskDetail, initialTab?: DetailTaskTab) => openDetailTaskWithHistory(task, initialTab)
+                : (task: Task | TaskDetail, initialTab?: DetailTaskTab) => modalManager.openDetailTask(task, initialTab),
+              renderTaskCard: (task: Task | TaskDetail) => (
                 <TaskCard
                   task={task}
                   projectId={currentProject?.id}
@@ -1331,7 +1335,7 @@ function AppInner() {
           <NativeShellConnectionStatus state={shellState} onManage={() => setShellConnectionManagerOpen(true)} />
         ) : undefined}
       />
-      {viewMode === "project" && currentProject && taskView !== "chat" && taskView !== "mailbox" && taskView !== "insights" && taskView !== "devserver" && taskView !== "dev-server" && !taskView.startsWith("plugin:") && (
+      {viewMode === "project" && currentProject && taskView !== "chat" && taskView !== "mailbox" && taskView !== "insights" && taskView !== "devserver" && taskView !== "dev-server" && !isPluginViewId(taskView) && (
         <QuickChatFAB
           projectId={currentProject.id}
           addToast={addToast}

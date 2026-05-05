@@ -839,7 +839,7 @@ describe("planning module", () => {
       await expect(submitResponse("invalid-session-id", {})).rejects.toThrow(SessionNotFoundError);
     });
 
-    it("throws InvalidSessionStateError when no active question", async () => {
+    it("throws InvalidSessionStateError when no active question and not refining", async () => {
       const mockIp = getUniqueIp();
       const { sessionId } = await createSession(mockIp, initialPlan, undefined, TEST_ROOT_DIR);
 
@@ -850,6 +850,88 @@ describe("planning module", () => {
 
       // Try to submit another response
       await expect(submitResponse(sessionId, {})).rejects.toThrow(InvalidSessionStateError);
+    });
+
+    it("continues from summary when refine is requested", async () => {
+      const mockIp = getUniqueIp();
+      setupMockAgent([
+        ...STANDARD_QUESTION_RESPONSES,
+        JSON.stringify({
+          type: "question",
+          data: {
+            id: "q-refine",
+            type: "text",
+            question: "What should we tighten in this plan?",
+            description: "Refine follow-up",
+          },
+        }),
+      ]);
+
+      const { sessionId } = await createSession(mockIp, initialPlan, undefined, TEST_ROOT_DIR);
+      await submitResponse(sessionId, { scope: "small" }, TEST_ROOT_DIR);
+      await submitResponse(sessionId, { requirements: "test" }, TEST_ROOT_DIR);
+      await submitResponse(sessionId, { confirm: true }, TEST_ROOT_DIR);
+
+      const response = await submitResponse(sessionId, { refine: true }, TEST_ROOT_DIR);
+      expect(response.type).toBe("question");
+      if (response.type === "question") {
+        expect(response.data.id).toBe("q-refine");
+      }
+      expect(getSummary(sessionId)).toBeUndefined();
+    });
+
+    it("rehydrates a completed persisted session and refines from summary", async () => {
+      const store = new MockAiSessionStore();
+      const summary = {
+        title: "Recovered summary",
+        description: "Recovered summary description",
+        suggestedSize: "M",
+        suggestedDependencies: [],
+        keyDeliverables: ["Deliverable"],
+      };
+      const row = buildPlanningRow({
+        id: "planning-complete-refine",
+        status: "complete",
+        conversationHistory: JSON.stringify([
+          {
+            question: {
+              id: "q-existing",
+              type: "text",
+              question: "What should we build?",
+              description: "baseline",
+            },
+            response: { "q-existing": "A useful feature" },
+          },
+        ]),
+        currentQuestion: "null",
+        result: JSON.stringify(summary),
+      });
+      store.rows.set(row.id, row);
+      setAiSessionStore(store as any);
+
+      const resumedAgent = createMockAgent([
+        JSON.stringify({
+          type: "question",
+          data: {
+            id: "q-refine-rehydrated",
+            type: "text",
+            question: "Any additional constraints?",
+            description: "Refine resumed",
+          },
+        }),
+      ]);
+      const createFnAgentSpy = vi.fn(async () => resumedAgent);
+      __setCreateFnAgent(createFnAgentSpy as any);
+
+      const response = await submitResponse(row.id, { refine: true }, TEST_ROOT_DIR);
+      expect(response.type).toBe("question");
+      if (response.type === "question") {
+        expect(response.data.id).toBe("q-refine-rehydrated");
+      }
+      expect(createFnAgentSpy).toHaveBeenCalledTimes(1);
+      expect(resumedAgent.session.prompt).toHaveBeenCalledTimes(2);
+      expect(resumedAgent.session.prompt.mock.calls[0]?.[0]).toContain("Previous conversation summary");
+      expect(resumedAgent.session.prompt.mock.calls[1]?.[0]).toContain("Refine Further");
     });
 
     it("reconstructs agent for a rehydrated session and continues conversation", async () => {

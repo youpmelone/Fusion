@@ -46,6 +46,7 @@ import {
   type AgentPromptsConfig,
   type CanonicalMergeConflictStrategy,
   type TaskSourceIssue,
+  type Task,
 } from "@fusion/core";
 import { describeModel, promptWithFallback } from "./pi.js";
 import { accumulateSessionTokenUsage } from "./session-token-usage.js";
@@ -248,6 +249,72 @@ interface InferredTestCommand {
   /** Source indicates whether this was explicitly configured or inferred from project files */
   testSource: "explicit" | "inferred";
   buildSource?: "explicit" | "inferred";
+}
+
+interface OwnedLandedCommit {
+  sha: string;
+  subject?: string;
+  filesChanged?: number;
+  insertions?: number;
+  deletions?: number;
+}
+
+function commitOwnedByTask(taskId: string, subject: string, body: string): boolean {
+  return body.includes(`${FUSION_TASK_ID_TRAILER_KEY}: ${taskId}`) || subject.includes(taskId);
+}
+
+async function findOwnedLandedCommitForTask(rootDir: string, task: Task): Promise<OwnedLandedCommit | null> {
+  const tryHydrate = async (sha: string): Promise<OwnedLandedCommit | null> => {
+    try {
+      await execFileAsync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], { cwd: rootDir });
+      const { stdout } = await execFileAsync("git", ["log", "-1", "--format=%H%x1f%s%x1f%b", sha], {
+        cwd: rootDir,
+        encoding: "utf-8",
+      });
+      const [resolvedSha, subject = "", body = ""] = stdout.trim().split("\x1f");
+      if (!resolvedSha || !commitOwnedByTask(task.id, subject, body)) return null;
+      const owned: OwnedLandedCommit = { sha: resolvedSha, subject };
+      try {
+        const { stdout: statsOut } = await execFileAsync("git", ["show", "--shortstat", "--format=", resolvedSha], {
+          cwd: rootDir,
+          encoding: "utf-8",
+        });
+        Object.assign(owned, parseDiffStat(statsOut));
+      } catch {
+        // stats optional
+      }
+      return owned;
+    } catch {
+      return null;
+    }
+  };
+
+  if (task.mergeDetails?.commitSha) {
+    const ownedStored = await tryHydrate(task.mergeDetails.commitSha);
+    if (ownedStored) return ownedStored;
+  }
+
+  const trailer = `${FUSION_TASK_ID_TRAILER_KEY}: ${task.id}`;
+  const searches: string[][] = [
+    ["log", "--format=%H%x1f%s", "--max-count=20", "--fixed-strings", `--grep=${trailer}`, "HEAD"],
+    ["log", "--format=%H%x1f%s", "--max-count=20", "--fixed-strings", `--grep=${task.id}`, "HEAD"],
+  ];
+
+  for (const args of searches) {
+    try {
+      const { stdout } = await execFileAsync("git", args, { cwd: rootDir, encoding: "utf-8" });
+      const first = stdout.trim().split("\n").find(Boolean);
+      if (!first) continue;
+      const [sha] = first.split("\x1f");
+      if (!sha) continue;
+      const owned = await tryHydrate(sha);
+      if (owned) return owned;
+    } catch {
+      // continue
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -1770,9 +1837,13 @@ function getCommitAuthorArg(settings: {
 }
 
 export function buildSourceIssueRef(sourceIssue?: TaskSourceIssue | null): string {
-  if (!sourceIssue || sourceIssue.provider !== "github") return "";
-  if (!sourceIssue.repository || !sourceIssue.issueNumber) return "";
-  return `${sourceIssue.repository}#${sourceIssue.issueNumber}`;
+  if (!sourceIssue || sourceIssue.provider !== "github" || !sourceIssue.repository) return "";
+
+  const issueNumber = sourceIssue.issueNumber
+    ?? Number.parseInt(sourceIssue.externalIssueId ?? "", 10);
+
+  if (!Number.isInteger(issueNumber) || issueNumber < 1) return "";
+  return `${sourceIssue.repository}#${issueNumber}`;
 }
 
 /**
@@ -2658,25 +2729,23 @@ export async function aiMergeTask(
     });
   } catch {
     result.error = `Branch '${branch}' not found — moving to done without merge`;
-    // Best-effort: try to capture current HEAD commitSha even though branch is missing
-    try {
-      const commitSha = execSyncText("git rev-parse HEAD", {
-        cwd: rootDir,
-        stdio: "pipe",
-        encoding: "utf-8",
-      }).trim() || undefined;
-      if (commitSha) {
-        await store.updateTask(taskId, {
-          mergeDetails: {
-            commitSha,
-            mergedAt: new Date().toISOString(),
-            mergeConfirmed: false,
-          },
-        });
-        mergerLog.log(`${taskId}: branch not found but captured commitSha ${commitSha.slice(0, 8)}`);
-      }
-    } catch {
-      // No commit SHA available — task will show summary fallback
+    // Branch is gone; never infer ownership from raw HEAD. Only persist commit
+    // metadata when we can prove a landed commit belongs to this task.
+    const ownedCommit = await findOwnedLandedCommitForTask(rootDir, task);
+    if (ownedCommit) {
+      await store.updateTask(taskId, {
+        mergeDetails: {
+          commitSha: ownedCommit.sha,
+          filesChanged: ownedCommit.filesChanged,
+          insertions: ownedCommit.insertions,
+          deletions: ownedCommit.deletions,
+          mergeCommitMessage: ownedCommit.subject,
+          mergedAt: new Date().toISOString(),
+          mergeConfirmed: true,
+          prNumber: task.prInfo?.number,
+        },
+      });
+      mergerLog.log(`${taskId}: branch missing; recovered owned landed commit ${ownedCommit.sha.slice(0, 8)}`);
     }
     // Audit trail: record merge completion (FN-1404)
     await audit.database({ type: "task:move", target: taskId, metadata: { to: "done", merged: false } });

@@ -88,7 +88,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 61;
+const SCHEMA_VERSION = 62;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -465,6 +465,71 @@ CREATE TABLE IF NOT EXISTS research_run_events (
   FOREIGN KEY (runId) REFERENCES research_runs(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idxResearchRunEventsRunIdSeq ON research_run_events(runId, seq);
+
+-- Eval run persistence (FN-3387)
+CREATE TABLE IF NOT EXISTS eval_runs (
+  id TEXT PRIMARY KEY,
+  projectId TEXT NOT NULL,
+  status TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  window TEXT NOT NULL DEFAULT '{}',
+  requestedTaskIds TEXT NOT NULL DEFAULT '[]',
+  evaluatedTaskIds TEXT NOT NULL DEFAULT '[]',
+  counts TEXT NOT NULL DEFAULT '{"totalTasks":0,"scoredTasks":0,"skippedTasks":0,"erroredTasks":0}',
+  aggregateScores TEXT,
+  summary TEXT,
+  error TEXT,
+  provenance TEXT,
+  metadata TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  startedAt TEXT,
+  completedAt TEXT,
+  cancelledAt TEXT
+);
+CREATE INDEX IF NOT EXISTS idxEvalRunsProjectIdCreatedAt ON eval_runs(projectId, createdAt);
+CREATE INDEX IF NOT EXISTS idxEvalRunsProjectTriggerStatus ON eval_runs(projectId, trigger, status);
+CREATE INDEX IF NOT EXISTS idxEvalRunsStatusCreatedAt ON eval_runs(status, createdAt);
+
+CREATE TABLE IF NOT EXISTS eval_task_results (
+  id TEXT PRIMARY KEY,
+  runId TEXT NOT NULL,
+  taskId TEXT NOT NULL,
+  taskSnapshot TEXT NOT NULL,
+  status TEXT NOT NULL,
+  overallScore REAL,
+  maxScore REAL,
+  categoryScores TEXT NOT NULL DEFAULT '[]',
+  rationale TEXT,
+  summary TEXT,
+  evidence TEXT NOT NULL DEFAULT '[]',
+  deterministicSignals TEXT NOT NULL DEFAULT '[]',
+  aiSignals TEXT,
+  followUps TEXT NOT NULL DEFAULT '[]',
+  provenance TEXT,
+  metadata TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  FOREIGN KEY (runId) REFERENCES eval_runs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idxEvalTaskResultsRunIdCreatedAt ON eval_task_results(runId, createdAt);
+CREATE INDEX IF NOT EXISTS idxEvalTaskResultsTaskIdCreatedAt ON eval_task_results(taskId, createdAt);
+CREATE INDEX IF NOT EXISTS idxEvalTaskResultsStatusRunId ON eval_task_results(status, runId);
+
+CREATE TABLE IF NOT EXISTS eval_run_events (
+  id TEXT PRIMARY KEY,
+  runId TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  message TEXT NOT NULL,
+  status TEXT,
+  taskId TEXT,
+  metadata TEXT,
+  createdAt TEXT NOT NULL,
+  FOREIGN KEY (runId) REFERENCES eval_runs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idxEvalRunEventsRunIdSeq ON eval_run_events(runId, seq);
 
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS __meta (
@@ -2410,6 +2475,80 @@ export class Database {
           )
         `);
         this.db.exec(`CREATE INDEX IF NOT EXISTS idxVerificationCacheRecordedAt ON verification_cache(recordedAt)`);
+      });
+    }
+
+    if (version < 62) {
+      this.applyMigration(62, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS eval_runs (
+            id TEXT PRIMARY KEY,
+            projectId TEXT NOT NULL,
+            status TEXT NOT NULL,
+            trigger TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            window TEXT NOT NULL DEFAULT '{}',
+            requestedTaskIds TEXT NOT NULL DEFAULT '[]',
+            evaluatedTaskIds TEXT NOT NULL DEFAULT '[]',
+            counts TEXT NOT NULL DEFAULT '{"totalTasks":0,"scoredTasks":0,"skippedTasks":0,"erroredTasks":0}',
+            aggregateScores TEXT,
+            summary TEXT,
+            error TEXT,
+            provenance TEXT,
+            metadata TEXT,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            startedAt TEXT,
+            completedAt TEXT,
+            cancelledAt TEXT
+          )
+        `);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxEvalRunsProjectIdCreatedAt ON eval_runs(projectId, createdAt)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxEvalRunsProjectTriggerStatus ON eval_runs(projectId, trigger, status)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxEvalRunsStatusCreatedAt ON eval_runs(status, createdAt)`);
+
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS eval_task_results (
+            id TEXT PRIMARY KEY,
+            runId TEXT NOT NULL,
+            taskId TEXT NOT NULL,
+            taskSnapshot TEXT NOT NULL,
+            status TEXT NOT NULL,
+            overallScore REAL,
+            maxScore REAL,
+            categoryScores TEXT NOT NULL DEFAULT '[]',
+            rationale TEXT,
+            summary TEXT,
+            evidence TEXT NOT NULL DEFAULT '[]',
+            deterministicSignals TEXT NOT NULL DEFAULT '[]',
+            aiSignals TEXT,
+            followUps TEXT NOT NULL DEFAULT '[]',
+            provenance TEXT,
+            metadata TEXT,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            FOREIGN KEY (runId) REFERENCES eval_runs(id) ON DELETE CASCADE
+          )
+        `);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxEvalTaskResultsRunIdCreatedAt ON eval_task_results(runId, createdAt)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxEvalTaskResultsTaskIdCreatedAt ON eval_task_results(taskId, createdAt)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxEvalTaskResultsStatusRunId ON eval_task_results(status, runId)`);
+
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS eval_run_events (
+            id TEXT PRIMARY KEY,
+            runId TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            message TEXT NOT NULL,
+            status TEXT,
+            taskId TEXT,
+            metadata TEXT,
+            createdAt TEXT NOT NULL,
+            FOREIGN KEY (runId) REFERENCES eval_runs(id) ON DELETE CASCADE
+          )
+        `);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxEvalRunEventsRunIdSeq ON eval_run_events(runId, seq)`);
       });
     }
 

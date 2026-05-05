@@ -6,7 +6,7 @@
 - **Backend settings keys defined in `@fusion/core`:** **78** total
   - **Global settings:** 17 (`GlobalSettings`)
   - **Project settings:** 61 (`ProjectSettings`)
-- **SQLite tables in project DB schema (`packages/core/src/db.ts`):** **36** (including migration-created tables)
+- **SQLite tables in project DB schema (`packages/core/src/db.ts`):** **39** (including migration-created tables)
 - **Issues identified:** **9**
   - High: 2
   - Medium: 5
@@ -209,6 +209,9 @@ Additional backend notes:
 | `research_runs` | Research run state (query, topic, status, lifecycle, sources, results, citations, events, exports, token usage). Supports project-scoped active-run uniqueness via `(projectId, trigger, status)` index. Terminal runs are immutable. |
 | `research_exports` | Persisted export records for research runs (`runId` FK cascade). Stores format, content, and optional file path. |
 | `research_run_events` | Append-only event log for research run lifecycle tracking (`runId` FK cascade, ordered by `seq`). Records status transitions, phase changes, step lifecycle, and failure classifications. |
+| `eval_runs` | Eval run lifecycle state (status, trigger, scope, evaluation window boundaries, evaluated task IDs/counts, aggregate scores, provenance). |
+| `eval_task_results` | Per-task eval outcomes linked to runs (`runId` FK cascade), including durable task snapshots, category scores, evidence references, deterministic/AI signal payloads, rationale, and follow-up suggestions. |
+| `eval_run_events` | Append-only eval run event trail (`runId` FK cascade, ordered by `seq`) for orchestration/debug auditing and downstream API/UI drill-down. |
 
 ---
 

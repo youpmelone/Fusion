@@ -1,8 +1,14 @@
 import { defineConfig } from "vitest/config";
 import { resolve } from "node:path";
+import { computeMaxWorkers } from "../core/src/__test-utils__/vitest-workers";
+
+const maxWorkers = computeMaxWorkers();
 
 export default defineConfig({
   test: {
+    pool: "forks",
+    maxWorkers,
+    poolOptions: { forks: { minForks: 1, maxForks: maxWorkers } },
     globals: true,
     setupFiles: [
       "./src/__tests__/setup-test-isolation.ts",

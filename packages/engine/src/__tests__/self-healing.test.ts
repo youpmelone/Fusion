@@ -3006,6 +3006,82 @@ describe("stale triage processing eviction before recovery", () => {
 
 // ── Maintenance cycle concurrency ──────────────────────────────────
 
+describe("recoverDoneTaskMergeMetadata", () => {
+  it("upgrades done task metadata to an owned landed commit", async () => {
+    const store = createMockStore();
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+
+    (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "FN-3469",
+        column: "done",
+        paused: false,
+        baseCommitSha: "base",
+        mergeDetails: { commitSha: "sharedsha", mergeConfirmed: false },
+        modifiedFiles: ["AGENTS.md"],
+      },
+    ]);
+
+    mockedExecSync.mockImplementation((command) => {
+      const cmd = String(command);
+      if (cmd.includes("merge-base --is-ancestor sharedsha HEAD")) return "" as any;
+      if (cmd.includes("log -1 --format=%H%x1f%s%x1f%b sharedsha")) {
+        return "sharedsha\u001ffix(FN-3468): other\u001fFusion-Task-Id: FN-3468" as any;
+      }
+      if (cmd.includes("Fusion-Task-Id: FN-3469")) {
+        return "a47b1e5\u001ffix(FN-3469): correct lazy-loaded views\n" as any;
+      }
+      if (cmd.includes("show --shortstat --format= a47b1e5")) {
+        return "2 files changed, 84 insertions(+), 2 deletions(-)" as any;
+      }
+      return "" as any;
+    });
+
+    const repaired = await manager.recoverDoneTaskMergeMetadata();
+
+    expect(repaired).toBe(1);
+    expect(store.updateTask).toHaveBeenCalledWith("FN-3469", {
+      mergeDetails: expect.objectContaining({
+        commitSha: "a47b1e5",
+        mergeConfirmed: true,
+      }),
+    });
+
+    manager.stop();
+  });
+
+  it("clears unowned shared SHA for done task when no owned landed commit exists", async () => {
+    const store = createMockStore();
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+
+    (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "FN-3373",
+        column: "done",
+        paused: false,
+        mergeDetails: { commitSha: "196adbd", mergeConfirmed: false },
+        modifiedFiles: ["packages/cli/src/extension.ts"],
+      },
+    ]);
+
+    mockedExecSync.mockImplementation((command) => {
+      const cmd = String(command);
+      if (cmd.includes("merge-base --is-ancestor 196adbd HEAD")) return "" as any;
+      if (cmd.includes("log -1 --format=%H%x1f%s%x1f%b 196adbd")) {
+        return "196adbd\u001ffeat(FN-3372): add safety net\u001fFusion-Task-Id: FN-3372" as any;
+      }
+      return "" as any;
+    });
+
+    const repaired = await manager.recoverDoneTaskMergeMetadata();
+
+    expect(repaired).toBe(1);
+    expect(store.updateTask).toHaveBeenCalledWith("FN-3373", { mergeDetails: undefined });
+
+    manager.stop();
+  });
+});
+
 describe("maintenance cycle concurrency", () => {
   let store: TaskStore & EventEmitter;
   let manager: SelfHealingManager;

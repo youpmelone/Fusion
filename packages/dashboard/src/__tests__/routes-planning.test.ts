@@ -991,6 +991,50 @@ describe("Planning Mode Routes", () => {
         expect(finalRes.body.data.keyDeliverables).toBeInstanceOf(Array);
       });
 
+      it("allows refine requests from completed sessions", async () => {
+        const startRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start",
+          JSON.stringify({ initialPlan: "Build a user auth system" }),
+          { "Content-Type": "application/json" }
+        );
+        const sessionId = startRes.body.sessionId;
+
+        await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/respond",
+          JSON.stringify({ sessionId, responses: { scope: "medium" } }),
+          { "Content-Type": "application/json" }
+        );
+        await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/respond",
+          JSON.stringify({ sessionId, responses: { requirements: "Must have login" } }),
+          { "Content-Type": "application/json" }
+        );
+        await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/respond",
+          JSON.stringify({ sessionId, responses: { confirm: true } }),
+          { "Content-Type": "application/json" }
+        );
+
+        const refineRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/respond",
+          JSON.stringify({ sessionId, responses: { refine: true } }),
+          { "Content-Type": "application/json" }
+        );
+
+        expect(refineRes.status).toBe(200);
+        expect(["question", "complete"]).toContain(refineRes.body.type);
+      });
+
       it("returns 404 for invalid session ID", async () => {
         const res = await REQUEST(
           buildApp(),

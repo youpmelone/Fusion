@@ -2505,6 +2505,19 @@ describe("buildExecutionPrompt", () => {
     expect(result).toContain('git commit -m "feat(FN-001): complete Step N — description" -m "Ref: runfusion/fusion#2915"');
   });
 
+  it("falls back to externalIssueId for commit source issue reference when issueNumber is missing", () => {
+    const task = createMockTaskDetail({
+      sourceIssue: {
+        provider: "github",
+        repository: "runfusion/fusion",
+        externalIssueId: "2915",
+      },
+    } as any);
+
+    const result = buildExecutionPrompt(task, "/home/user/project");
+    expect(result).toContain('git commit -m "feat(FN-001): complete Step N — description" -m "Ref: runfusion/fusion#2915"');
+  });
+
   it("omits source issue reference from commit instruction when sourceIssue is missing", () => {
     const task = createMockTaskDetail();
     const result = buildExecutionPrompt(task, "/home/user/project");
@@ -3854,7 +3867,6 @@ describe("swallowed async store failure observability", () => {
       });
 
       await (executor as any).terminateChildAgent("child-007");
-      await vi.advanceTimersByTimeAsync(5000);
       await Promise.resolve();
 
       expect(warnSpy).toHaveBeenCalledWith(
@@ -10809,71 +10821,38 @@ describe("Agent Spawning - Child Termination", () => {
     expect(internals.totalSpawnedCount).toBe(0);
   });
 
-  it("terminateChildAgent auto-deletes agent after 5 second delay", async () => {
-    vi.useFakeTimers();
+  it("terminateChildAgent auto-deletes agent immediately", async () => {
+    const agentStore = createMockAgentStore() as any;
+    agentStore.deleteAgent = vi.fn().mockResolvedValue(undefined);
+    const store = createMockStore();
 
-    try {
-      const agentStore = createMockAgentStore() as any;
-      // Add deleteAgent mock to the agent store
-      agentStore.deleteAgent = vi.fn().mockResolvedValue(undefined);
-      const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test", { agentStore } as any);
+    const internals = executor as any;
 
-      const executor = new TaskExecutor(store, "/tmp/test", { agentStore } as any);
-      const internals = executor as any;
+    const mockSession = { dispose: vi.fn() };
+    const childId = "agent-auto-delete-test";
+    internals.childSessions.set(childId, mockSession);
+    internals.totalSpawnedCount = 1;
 
-      const mockSession = { dispose: vi.fn() };
-      const childId = "agent-auto-delete-test";
-      internals.childSessions.set(childId, mockSession);
-      internals.totalSpawnedCount = 1;
+    await internals.terminateChildAgent(childId);
 
-      // Terminate the child
-      const terminatePromise = internals.terminateChildAgent(childId);
-      await terminatePromise;
-
-      // Session should be disposed immediately
-      expect(mockSession.dispose).toHaveBeenCalled();
-      expect(internals.pendingEphemeralDeletions.has(childId)).toBe(true);
-
-      // deleteAgent should not be called yet (before 5 seconds)
-      expect(agentStore.deleteAgent).not.toHaveBeenCalled();
-
-      // Advance timers by 5 seconds
-      await vi.advanceTimersByTimeAsync(5000);
-
-      // Now deleteAgent should have been called
-      expect(agentStore.deleteAgent).toHaveBeenCalledTimes(1);
-      expect(agentStore.deleteAgent).toHaveBeenCalledWith(childId);
-      expect(internals.pendingEphemeralDeletions.has(childId)).toBe(false);
-
-      // Should not throw even when delete fails
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(mockSession.dispose).toHaveBeenCalled();
+    expect(agentStore.deleteAgent).toHaveBeenCalledTimes(1);
+    expect(agentStore.deleteAgent).toHaveBeenCalledWith(childId);
+    expect(internals.pendingEphemeralDeletions.has(childId)).toBe(false);
   });
 
-  it("disposeEphemeralTimers clears pending spawned cleanup timers", async () => {
-    vi.useFakeTimers();
-    try {
-      const agentStore = createMockAgentStore() as any;
-      agentStore.deleteAgent = vi.fn().mockResolvedValue(undefined);
-      const store = createMockStore();
-      const executor = new TaskExecutor(store, "/tmp/test", { agentStore } as any);
-      const internals = executor as any;
+  it("disposeEphemeralTimers clears pending deletion bookkeeping", async () => {
+    const agentStore = createMockAgentStore() as any;
+    agentStore.deleteAgent = vi.fn().mockResolvedValue(undefined);
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test", { agentStore } as any);
+    const internals = executor as any;
 
-      internals.childSessions.set("agent-dispose-test", { dispose: vi.fn() });
-      internals.totalSpawnedCount = 1;
-      await internals.terminateChildAgent("agent-dispose-test");
-      expect(internals.pendingEphemeralDeletions.has("agent-dispose-test")).toBe(true);
+    internals.pendingEphemeralDeletions.add("agent-dispose-test");
+    executor.disposeEphemeralTimers();
 
-      executor.disposeEphemeralTimers();
-      await vi.advanceTimersByTimeAsync(5000);
-
-      expect(agentStore.deleteAgent).not.toHaveBeenCalled();
-      expect(internals.pendingEphemeralDeletions.size).toBe(0);
-      expect(internals.ephemeralCleanupTimers.size).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(internals.pendingEphemeralDeletions.size).toBe(0);
   });
 });
 

@@ -117,6 +117,10 @@ interface LandedTaskCommit {
   deletions?: number;
 }
 
+function commitOwnedByTask(taskId: string, subject: string, body: string): boolean {
+  return body.includes(`Fusion-Task-Id: ${taskId}`) || subject.includes(taskId);
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
@@ -193,6 +197,7 @@ export class SelfHealingManager {
       { name: "stale-incomplete-review", fn: () => this.recoverStaleIncompleteReviewTasks().then(() => undefined) },
       { name: "failed-pre-merge-steps", fn: () => this.recoverReviewTasksWithFailedPreMergeSteps().then(() => undefined) },
       { name: "interrupted-merging", fn: () => this.recoverInterruptedMergingTasks().then(() => undefined) },
+      { name: "done-merge-metadata", fn: () => this.recoverDoneTaskMergeMetadata().then(() => undefined) },
       { name: "misclassified-failures", fn: () => this.recoverMisclassifiedFailures().then(() => undefined) },
       { name: "partial-progress-no-task-done", fn: () => this.recoverPartialProgressNoTaskDoneFailures().then(() => undefined) },
       { name: "orphaned-executions", fn: () => this.recoverOrphanedExecutions().then(() => undefined) },
@@ -467,18 +472,16 @@ export class SelfHealingManager {
     const storedSha = task.mergeDetails?.commitSha;
     if (storedSha) {
       try {
-        // Reachable from HEAD? Use --quiet --exit-code on rev-list.
         await execAsync(
           `git merge-base --is-ancestor ${shellQuote(storedSha)} HEAD`,
           { cwd: this.options.rootDir },
         );
-        // Yes — fetch its subject + stats.
         const { stdout } = await execAsync(
-          `git log -1 --format=%H%x1f%s ${shellQuote(storedSha)}`,
+          `git log -1 --format=%H%x1f%s%x1f%b ${shellQuote(storedSha)}`,
           { cwd: this.options.rootDir, maxBuffer: 1024 * 1024 },
         );
-        const [sha, subject] = stdout.trim().split("\x1f");
-        if (sha) {
+        const [sha, subject = "", body = ""] = stdout.trim().split("\x1f");
+        if (sha && commitOwnedByTask(task.id, subject, body)) {
           const commit: LandedTaskCommit = { sha, subject };
           try {
             const stats = await execAsync(`git show --shortstat --format= ${shellQuote(sha)}`, {
@@ -644,6 +647,7 @@ export class SelfHealingManager {
           { name: "recover-stale-incomplete-review", fn: () => this.recoverStaleIncompleteReviewTasks() },
           { name: "recover-failed-pre-merge-steps", fn: () => this.recoverReviewTasksWithFailedPreMergeSteps() },
           { name: "recover-interrupted-merging", fn: () => this.recoverInterruptedMergingTasks() },
+          { name: "recover-done-merge-metadata", fn: () => this.recoverDoneTaskMergeMetadata() },
           { name: "recover-mergeable-review", fn: () => this.recoverMergeableReviewTasks() },
           { name: "recover-merged-review", fn: () => this.recoverMergedReviewTasks() },
           { name: "recover-misclassified-failures", fn: () => this.recoverMisclassifiedFailures() },
@@ -1214,6 +1218,59 @@ export class SelfHealingManager {
       return recovered;
     } catch (err: unknown) { const errorMessage = err instanceof Error ? err.message : String(err);
       log.error(`Interrupted merge recovery failed: ${errorMessage}`);
+      return 0;
+    }
+  }
+
+  async recoverDoneTaskMergeMetadata(): Promise<number> {
+    try {
+      const tasks = await this.store.listTasks({ column: "done", slim: true });
+      const candidates = tasks.filter((task) => task.column === "done" && !task.paused && Boolean(task.mergeDetails?.commitSha));
+      if (candidates.length === 0) return 0;
+
+      let repaired = 0;
+      for (const task of candidates) {
+        try {
+          const landed = await this.findLandedTaskCommit(task);
+          if (!landed) {
+            if (task.mergeDetails?.mergeConfirmed === false) {
+              await this.store.updateTask(task.id, { mergeDetails: undefined });
+              await this.store.logEntry(task.id, "Auto-recovered: cleared unowned done-task mergeDetails commitSha");
+              repaired++;
+            }
+            continue;
+          }
+
+          const needsRepair =
+            task.mergeDetails?.commitSha !== landed.sha ||
+            task.mergeDetails?.mergeConfirmed !== true ||
+            task.mergeDetails?.filesChanged === undefined;
+
+          if (!needsRepair) continue;
+
+          await this.store.updateTask(task.id, {
+            mergeDetails: {
+              ...task.mergeDetails,
+              commitSha: landed.sha,
+              filesChanged: landed.filesChanged,
+              insertions: landed.insertions,
+              deletions: landed.deletions,
+              mergeCommitMessage: landed.subject,
+              mergedAt: task.mergeDetails?.mergedAt ?? new Date().toISOString(),
+              mergeConfirmed: true,
+              prNumber: task.prInfo?.number,
+            },
+          });
+          await this.store.logEntry(task.id, `Auto-recovered: reconciled done-task mergeDetails to owned commit ${landed.sha.slice(0, 8)}`);
+          repaired++;
+        } catch (err: unknown) {
+          log.error(`Failed done-task merge metadata recovery for ${task.id}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      return repaired;
+    } catch (err: unknown) {
+      log.error(`Done-task merge metadata recovery failed: ${err instanceof Error ? err.message : String(err)}`);
       return 0;
     }
   }

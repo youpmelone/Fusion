@@ -16,6 +16,7 @@ import { RoadmapStore } from "./roadmap-store.js";
 import { InsightStore } from "./insight-store.js";
 import { ResearchStore } from "./research-store.js";
 import { TodoStore } from "./todo-store.js";
+import { EvalStore } from "./eval-store.js";
 import { BackwardCompat, ProjectRequiredError } from "./migration.js";
 import { CentralCore } from "./central-core.js";
 import { getTaskMergeBlocker } from "./task-merge.js";
@@ -512,6 +513,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private researchStore: ResearchStore | null = null;
   /** Cached TodoStore instance */
   private todoStore: TodoStore | null = null;
+  /** Cached EvalStore instance */
+  private evalStore: EvalStore | null = null;
 
   /** Buffer for batching agent log writes to reduce WAL pressure. */
   private agentLogBuffer: Array<{
@@ -5166,51 +5169,72 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
     }
 
-    // Phase 3: Invalidate stale spec approval when a user comments on
-    // a triage task that is awaiting manual approval. The new comment
-    // means the spec is now stale and must be re-specified/re-reviewed.
+    // Phase 3: user comments on already-planned, non-executing work should
+    // trigger triage re-specification. This includes awaiting-approval
+    // invalidation and todo/triage tasks that have a real non-bootstrap spec.
     // This remains best-effort: failures are logged for observability but
     // never fail the comment add operation itself.
     // Note: The `task` returned above reflects the state BEFORE this
     // transition. Callers that need the post-transition status should
     // re-read the task (e.g., via getTask).
-    if (
-      task.column === "triage"
-      && task.status === "awaiting-approval"
-      && author === "user"
-    ) {
-      let invalidatedStatus = false;
+    if (author === "user" && (task.column === "todo" || task.column === "triage")) {
+      let hasRealPrompt = false;
       try {
-        await this.updateTask(id, {
-          status: "needs-replan",
-        });
-        invalidatedStatus = true;
+        const promptPath = join(this.taskDir(id), "PROMPT.md");
+        if (existsSync(promptPath)) {
+          const prompt = await readFile(promptPath, "utf-8");
+          hasRealPrompt = !isBootstrapPromptStub(prompt, task.id, task.title, task.description);
+        }
       } catch (err) {
-        storeLog.warn("Best-effort post-comment awaiting-approval invalidation failed", {
+        storeLog.warn("Best-effort post-comment re-triage prompt-read failed", {
           ...commentContextBase,
-          phase: "addComment:awaiting-approval-invalidation",
-          stage: "status-update",
-          nextStatus: "needs-replan",
+          phase: "addComment:retriage-prompt-read",
           error: err instanceof Error ? err.message : String(err),
         });
       }
 
-      if (invalidatedStatus) {
+      const shouldInvalidateAwaitingApproval =
+        task.column === "triage" && task.status === "awaiting-approval";
+      const shouldRetriagePlannedTask = hasRealPrompt
+        && (
+          task.column === "todo"
+          || (task.column === "triage" && task.status !== "awaiting-approval")
+        );
+
+      if (shouldInvalidateAwaitingApproval || shouldRetriagePlannedTask) {
+        const phase = shouldInvalidateAwaitingApproval
+          ? "addComment:awaiting-approval-invalidation"
+          : "addComment:planned-task-retriage";
+        const action = shouldInvalidateAwaitingApproval
+          ? "User comment invalidated spec approval — task needs re-specification"
+          : "User comment requested re-specification of planned task";
+        let transitioned = false;
+
         try {
-          await this.logEntry(
-            id,
-            `User comment invalidated spec approval — task needs re-specification`,
-            undefined,
-            runContext,
-          );
+          await this.updateTask(id, { status: "needs-replan" });
+          transitioned = true;
         } catch (err) {
-          storeLog.warn("Best-effort post-comment awaiting-approval invalidation failed", {
+          storeLog.warn("Best-effort post-comment re-triage failed", {
             ...commentContextBase,
-            phase: "addComment:awaiting-approval-invalidation",
-            stage: "post-invalidation-log-entry",
+            phase,
+            stage: "status-update",
             nextStatus: "needs-replan",
             error: err instanceof Error ? err.message : String(err),
           });
+        }
+
+        if (transitioned) {
+          try {
+            await this.logEntry(id, action, text, runContext);
+          } catch (err) {
+            storeLog.warn("Best-effort post-comment re-triage failed", {
+              ...commentContextBase,
+              phase,
+              stage: "post-invalidation-log-entry",
+              nextStatus: "needs-replan",
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
       }
     }
@@ -6590,6 +6614,17 @@ ${notificationsSection}`;
       this.todoStore = new TodoStore(this.db);
     }
     return this.todoStore;
+  }
+
+  /**
+   * Get the EvalStore instance for eval run and task result operations.
+   * Lazily initializes the EvalStore on first access.
+   */
+  getEvalStore(): EvalStore {
+    if (!this.evalStore) {
+      this.evalStore = new EvalStore(this.db);
+    }
+    return this.evalStore;
   }
 
   // ── Verification Cache ────────────────────────────────────────────────────

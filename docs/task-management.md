@@ -25,6 +25,7 @@ Use the 💡 button to open planning mode:
 - Break-into-tasks descriptions are structured with subtask-specific guidance first, then a separate larger-plan context section (plus `## Planning Interview Context` when interview history exists)
 - Sessions persist when the modal is closed — resume from the sidebar list at any time; reasoning context is restored automatically
 - Back navigation rewinds the server-side planning session to the previous answered question so you can revise earlier answers and continue from the corrected turn
+- On the summary screen, **Refine Further** continues through the backend planning session (including resumed completed sessions) and waits for a real follow-up question or updated summary; it does not switch to an empty question view
 
 ### 3) Todo item → Plan Mode
 
@@ -230,6 +231,20 @@ This file is the contract for execution and review.
 
 Steering comments can be injected mid-run into active executor sessions.
 
+### User comments and triage re-consideration
+
+User comments can trigger **re-triage** for already-planned but non-executing work:
+
+- `triage` + `awaiting-approval` → user comment sets `status: "needs-replan"`
+- `triage` or `todo` with a real (non-bootstrap-stub) `PROMPT.md` → user comment sets `status: "needs-replan"`
+- `triage` or `todo` with only bootstrap-stub/unplanned prompt content → no re-triage transition
+
+Execution ownership is preserved for active work:
+
+- User comments on `in-progress` and `in-review` tasks do **not** re-route those tasks back through triage.
+- Agent/system comments do **not** trigger comment-driven re-triage.
+
+This is distinct from steering comments: steering feedback targets the currently running executor session, while comment-driven re-triage requests a fresh specification pass for planned work.
 ## Refinement Tasks
 
 `fn task refine <id>` creates a new planning task that depends on the original done/in-review task.
@@ -288,6 +303,8 @@ Archive entries preserve key metadata needed for restoration, including:
 ## GitHub Issue Import and PR Creation
 
 Import issues:
+
+- GitHub-imported tasks retain typed source issue metadata (`sourceIssue.provider/repository/externalIssueId/issueNumber/url`), which executor and merger flows use to include `Ref: owner/repo#N` in commit bodies.
 
 ```bash
 fn task import owner/repo --labels bug --limit 20
