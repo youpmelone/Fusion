@@ -96,6 +96,9 @@ describe("CI workflow (.github/workflows/ci.yml)", () => {
 
   it("keeps contributing docs aligned with verification and slow-lane contracts", () => {
     expect(contributingContent).toContain("pnpm test:full` must be runnable in a clean worktree without requiring a prior `pnpm build`.");
+    expect(contributingContent).toContain("`pnpm test:full` is supported from fn-managed checkouts under `.worktrees/<slug>`");
+    expect(contributingContent).toContain("FUSION_ACTIVE_WORKTREE_ROOT");
+    expect(contributingContent).toContain("Worker death, exit `137`, `ERR_IPC_CHANNEL_CLOSED`, missing test binaries, and package failures are real failures.");
     expect(contributingContent).toContain("`pnpm verify:workspace` is the canonical pre-merge gate");
     expect(contributingContent).toContain("1. `pnpm lint`");
     expect(contributingContent).toContain("2. `pnpm test:full`");
