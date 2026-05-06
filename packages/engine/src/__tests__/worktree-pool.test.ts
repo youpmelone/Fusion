@@ -42,6 +42,7 @@ vi.mock("node:fs", () => ({
   existsSync: vi.fn().mockReturnValue(true),
   lstatSync: vi.fn().mockReturnValue({ isDirectory: () => true, isSymbolicLink: () => false }),
   readdirSync: vi.fn().mockReturnValue([]),
+  realpathSync: vi.fn((path: string) => path),
   rmSync: vi.fn(),
 }));
 
@@ -653,6 +654,25 @@ describe("scanIdleWorktrees", () => {
     const idle = await scanIdleWorktrees("/root", store);
     expect(idle).toEqual(["/root/.worktrees/registered-wt"]);
   });
+
+  it("does not return the active current worktree as idle", async () => {
+    const previous = process.env.FUSION_ACTIVE_WORKTREE_ROOT;
+    process.env.FUSION_ACTIVE_WORKTREE_ROOT = "/root/.worktrees/dusky-trout";
+    try {
+      mockedReaddirSync.mockReturnValue([
+        makeDirEntry("dusky-trout"),
+        makeDirEntry("safe-idle"),
+      ] as any);
+      mockRegisteredWorktrees("/root", ["dusky-trout", "safe-idle"]);
+
+      const idle = await scanIdleWorktrees("/root", createMockStore([]));
+
+      expect(idle).toEqual(["/root/.worktrees/safe-idle"]);
+    } finally {
+      if (previous === undefined) delete process.env.FUSION_ACTIVE_WORKTREE_ROOT;
+      else process.env.FUSION_ACTIVE_WORKTREE_ROOT = previous;
+    }
+  });
 });
 
 // ── cleanupOrphanedWorktrees tests ────────────────────────────────────
@@ -795,7 +815,7 @@ describe("cleanupOrphanedWorktrees", () => {
     expect(removeCalls).toHaveLength(0);
   });
 
-  it("removes unregistered directories even when stale active task metadata references them", async () => {
+  it("preserves unregistered directories when active task metadata references them", async () => {
     mockedReaddirSync.mockReturnValue([
       makeDirEntry("broken-wt"),
     ] as any);
@@ -807,11 +827,35 @@ describe("cleanupOrphanedWorktrees", () => {
 
     const cleaned = await cleanupOrphanedWorktrees("/root", store);
 
-    expect(cleaned).toBe(1);
-    expect(mockedRmSync).toHaveBeenCalledWith("/root/.worktrees/broken-wt", {
+    expect(cleaned).toBe(0);
+    expect(mockedRmSync).not.toHaveBeenCalledWith("/root/.worktrees/broken-wt", {
       recursive: true,
       force: true,
     });
+  });
+
+  it("preserves the active current worktree even when it is unregistered", async () => {
+    const previous = process.env.FUSION_ACTIVE_WORKTREE_ROOT;
+    process.env.FUSION_ACTIVE_WORKTREE_ROOT = "/root/.worktrees/dusky-trout";
+    try {
+      mockedReaddirSync.mockReturnValue([
+        makeDirEntry("dusky-trout"),
+        makeDirEntry("safe-orphan"),
+      ] as any);
+      mockRegisteredWorktrees("/root", []);
+
+      const cleaned = await cleanupOrphanedWorktrees("/root", createMockStore([]));
+
+      expect(cleaned).toBe(1);
+      expect(mockedRmSync).not.toHaveBeenCalledWith("/root/.worktrees/dusky-trout", expect.anything());
+      expect(mockedRmSync).toHaveBeenCalledWith("/root/.worktrees/safe-orphan", {
+        recursive: true,
+        force: true,
+      });
+    } finally {
+      if (previous === undefined) delete process.env.FUSION_ACTIVE_WORKTREE_ROOT;
+      else process.env.FUSION_ACTIVE_WORKTREE_ROOT = previous;
+    }
   });
 });
 
@@ -1004,6 +1048,35 @@ describe("reapOrphanWorktrees", () => {
       recursive: true,
       force: true,
     });
+  });
+
+  it("does NOT remove the active current worktree even when it is unregistered", async () => {
+    const previous = process.env.FUSION_ACTIVE_WORKTREE_ROOT;
+    process.env.FUSION_ACTIVE_WORKTREE_ROOT = "/root/.worktrees/dusky-trout";
+    try {
+      mockedReaddirSync.mockReturnValue([
+        makeDirEntry("dusky-trout"),
+        makeDirEntry("stale-orphan"),
+      ] as any);
+      mockedExistsSync.mockImplementation((p: any) => {
+        const ps = String(p);
+        if (ps === "/root/.worktrees") return true;
+        if (ps.endsWith("/.git")) return false;
+        return true;
+      });
+
+      const removed = await reapOrphanWorktrees("/root");
+
+      expect(removed).toBe(1);
+      expect(mockedRmSync).not.toHaveBeenCalledWith("/root/.worktrees/dusky-trout", expect.anything());
+      expect(mockedRmSync).toHaveBeenCalledWith("/root/.worktrees/stale-orphan", {
+        recursive: true,
+        force: true,
+      });
+    } finally {
+      if (previous === undefined) delete process.env.FUSION_ACTIVE_WORKTREE_ROOT;
+      else process.env.FUSION_ACTIVE_WORKTREE_ROOT = previous;
+    }
   });
 
   it("does NOT remove a directory that is a registered git worktree", async () => {

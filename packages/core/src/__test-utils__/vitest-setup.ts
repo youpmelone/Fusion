@@ -97,6 +97,7 @@ function findRepoRoot(start: string): string {
 
 const repoRoot = findRepoRoot(realProjectRoot);
 process.env.FUSION_TEST_REAL_ROOT = repoRoot;
+process.env.FUSION_ACTIVE_WORKTREE_ROOT = process.env.FUSION_ACTIVE_WORKTREE_ROOT || repoRoot;
 
 // Shared parent directory for all worker temp dirs in this run.
 // globalTeardown wipes this at the end of the suite.
