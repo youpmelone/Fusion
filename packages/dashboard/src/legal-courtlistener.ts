@@ -309,12 +309,12 @@ function extractAuthorityMatches(raw: unknown): unknown[] {
         const itemRecord = asRecord(item);
         return itemRecord ? hasAuthorityFields(itemRecord) || asRecord(itemRecord.cluster) !== undefined || asRecord(itemRecord.opinion) !== undefined : false;
       }))) {
-        matches.push(...value);
+        matches.push(...extractAuthorityMatches(value));
         foundNested = true;
       } else {
         const valueRecord = asRecord(value);
         if (valueRecord && (CITATION_KEY_RE.test(key) || hasAuthorityFields(valueRecord))) {
-          matches.push(valueRecord);
+          matches.push(...extractAuthorityMatches(valueRecord));
           foundNested = true;
         }
       }

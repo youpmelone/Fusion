@@ -128,6 +128,29 @@ describe("CourtListener authority normalization", () => {
     expect(keyed.validatedCount).toBe(1);
   });
 
+  it("does not promote citation-keyed wrapper responses with empty or multiple clusters", async () => {
+    const empty = await validateAuthorityCandidatesWithCourtListener({
+      client: new FakeCourtListenerClient({ "1 U.S. 1": [{ citation: "1 U.S. 1", clusters: [] }] }),
+      request: { citations: ["1 U.S. 1"] },
+    });
+    expect(empty.validationRecords[0].status).toBe("not-found");
+    expect(empty.validatedCount).toBe(0);
+
+    const single = await validateAuthorityCandidatesWithCourtListener({
+      client: new FakeCourtListenerClient({ "1 U.S. 1": [{ citation: "1 U.S. 1", clusters: [{ case_name: "Single" }] }] }),
+      request: { citations: ["1 U.S. 1"] },
+    });
+    expect(single.validationRecords[0]).toMatchObject({ status: "matched", caseName: "Single" });
+    expect(single.validatedCount).toBe(1);
+
+    const multiple = await validateAuthorityCandidatesWithCourtListener({
+      client: new FakeCourtListenerClient({ "1 U.S. 1": [{ citation: "1 U.S. 1", clusters: [{ case_name: "Left" }, { case_name: "Right" }] }] }),
+      request: { citations: ["1 U.S. 1"] },
+    });
+    expect(multiple.validationRecords[0].status).toBe("ambiguous");
+    expect(multiple.validatedCount).toBe(0);
+  });
+
   it("treats empty citation lookup wrappers as not found and multi-cluster wrappers as ambiguous", async () => {
     const emptyWrapper = await validateAuthorityCandidatesWithCourtListener({
       client: new FakeCourtListenerClient([{ citation: "1 U.S. 1", clusters: [] }]),
