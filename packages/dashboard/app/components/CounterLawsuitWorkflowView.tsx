@@ -17,10 +17,10 @@ interface CounterLawsuitWorkflowViewProps {
 const REQUESTED_ARTIFACTS = [
   { id: "research-memo", label: "Research memo" },
   { id: "evidence-ledger", label: "Evidence ledger" },
-  { id: "claim-map", label: "Claim map" },
+  { id: "claim-map", label: "Claim and counterclaim map" },
   { id: "draft-counter-lawsuit-complaint", label: "Draft counter-lawsuit complaint" },
   { id: "red-team-report", label: "Opposing-counsel red-team report" },
-  { id: "lineage-scoring-log", label: "Lineage/scoring log" },
+  { id: "lineage-scoring-log", label: "Lineage and scoring log" },
 ] as const;
 
 const SAFEGUARDS: StartCounterLawsuitPrototypeWorkflowInput["safeguards"] = {

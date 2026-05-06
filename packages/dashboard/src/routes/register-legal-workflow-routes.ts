@@ -33,6 +33,14 @@ import {
   type CounterLawsuitClaimMapResult,
 } from "../legal-claim-map.js";
 import {
+  DRAFT_COMPLAINT_DOCUMENT_KEY,
+  DRAFT_COMPLAINT_SAFETY_NOTICE,
+  deriveComplaintDraftStatusForRun,
+  generateCounterLawsuitComplaintDraft,
+  type ComplaintDraftDiagnostic,
+  type CounterLawsuitComplaintDraftResult,
+} from "../legal-complaint-draft.js";
+import {
   COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY,
   COURTLISTENER_SAFETY_NOTICE,
   deriveAuthorityValidationStatusForRun,
@@ -129,6 +137,22 @@ export interface LegalWorkflowClaimMapSummary {
   missingProofCount: number;
   unresolvedGapCount: number;
   diagnostics: ClaimMapDiagnostic[];
+  safetyNotice: string;
+}
+
+export interface LegalWorkflowComplaintDraftSummary {
+  runId: string;
+  status: CounterLawsuitComplaintDraftResult["status"];
+  draftComplaintDocumentKey?: string;
+  statusDocumentKey?: string;
+  sectionCount: number;
+  paragraphCount: number;
+  claimDraftCount: number;
+  sourceReferenceCount: number;
+  sourcePathCount: number;
+  missingProofCount: number;
+  unresolvedGapCount: number;
+  diagnostics: ComplaintDraftDiagnostic[];
   safetyNotice: string;
 }
 
@@ -474,6 +498,66 @@ function validateClaimMapRetryPayload(body: unknown): { force?: boolean } {
   return validateForceOnlyPayload(body, "claim map");
 }
 
+function complaintDraftFailureSummary(runId: string): LegalWorkflowComplaintDraftSummary {
+  return {
+    runId,
+    status: "failed",
+    draftComplaintDocumentKey: DRAFT_COMPLAINT_DOCUMENT_KEY,
+    sectionCount: 0,
+    paragraphCount: 0,
+    claimDraftCount: 0,
+    sourceReferenceCount: 0,
+    sourcePathCount: 0,
+    missingProofCount: 0,
+    unresolvedGapCount: 0,
+    diagnostics: [{
+      code: "draft-complaint-route-failed",
+      severity: "error",
+      message: "Draft complaint generation failed before a complaint summary could be returned. The workflow run remains queued; retry the draft-counter-lawsuit-complaint endpoint after checking prerequisite documents.",
+      sourceDocumentKey: DRAFT_COMPLAINT_DOCUMENT_KEY,
+    }],
+    safetyNotice: DRAFT_COMPLAINT_SAFETY_NOTICE,
+  };
+}
+
+async function runComplaintDraftForResponse(params: {
+  store: TaskStore;
+  runId: string;
+  force?: boolean;
+  deps: LegalWorkflowRouteDeps;
+}): Promise<LegalWorkflowComplaintDraftSummary> {
+  try {
+    const result = await generateCounterLawsuitComplaintDraft({
+      taskStore: params.store,
+      runId: params.runId,
+      force: params.force,
+      now: params.deps.now,
+    });
+    return {
+      runId: result.runId,
+      status: result.status,
+      draftComplaintDocumentKey: result.draftComplaintDocumentKey,
+      statusDocumentKey: result.statusDocumentKey,
+      sectionCount: result.counts.sections,
+      paragraphCount: result.counts.paragraphs,
+      claimDraftCount: result.counts.claimDrafts,
+      sourceReferenceCount: result.counts.sourceReferences,
+      sourcePathCount: result.counts.sourcePaths,
+      missingProofCount: result.counts.missingProof,
+      unresolvedGapCount: result.counts.unresolvedGaps,
+      diagnostics: result.diagnostics,
+      safetyNotice: result.safetyNotice,
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.statusCode === 404) throw error;
+    return complaintDraftFailureSummary(params.runId);
+  }
+}
+
+function validateComplaintDraftRetryPayload(body: unknown): { force?: boolean } {
+  return validateForceOnlyPayload(body, "draft complaint");
+}
+
 export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWorkflowRouteDeps = {}): void {
   const { router, getProjectContext, rethrowAsApiError } = ctx;
   const createAgentStore = deps.createAgentStore ?? defaultCreateAgentStore;
@@ -513,7 +597,12 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         runId: response.runId,
         deps,
       });
-      res.status(201).json({ ...response, vaultMining, authorityValidation, researchMemo, evidenceLedger, claimMap });
+      const draftComplaint = await runComplaintDraftForResponse({
+        store: scopedStore,
+        runId: response.runId,
+        deps,
+      });
+      res.status(201).json({ ...response, vaultMining, authorityValidation, researchMemo, evidenceLedger, claimMap, draftComplaint });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;
@@ -642,6 +731,30 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
     }
   });
 
+  router.post("/legal-workflows/counter-lawsuit/runs/:runId/draft-counter-lawsuit-complaint", async (req, res) => {
+    try {
+      if (!req.params.runId?.trim()) throw badRequest("runId is required");
+      const { store: scopedStore } = await getProjectContext(req);
+      const request = validateComplaintDraftRetryPayload(req.body);
+      await getCounterLawsuitWorkflowRunStatus({
+        taskStore: scopedStore,
+        runId: req.params.runId,
+      });
+      const draftComplaint = await runComplaintDraftForResponse({
+        store: scopedStore,
+        runId: req.params.runId,
+        force: request.force,
+        deps,
+      });
+      res.json(draftComplaint);
+    } catch (error: unknown) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      rethrowAsApiError(error);
+    }
+  });
+
   router.get("/legal-workflows/counter-lawsuit/runs/:runId", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
@@ -669,7 +782,11 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         taskStore: scopedStore,
         runId: req.params.runId,
       });
-      res.json({ ...status, vaultMining, authorityValidation, researchMemo, evidenceLedger, claimMap });
+      const draftComplaint = await deriveComplaintDraftStatusForRun({
+        taskStore: scopedStore,
+        runId: req.params.runId,
+      });
+      res.json({ ...status, vaultMining, authorityValidation, researchMemo, evidenceLedger, claimMap, draftComplaint });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;

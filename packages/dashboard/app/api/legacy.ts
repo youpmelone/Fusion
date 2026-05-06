@@ -8530,6 +8530,38 @@ export interface CounterLawsuitClaimMapRetryInput {
   force?: boolean;
 }
 
+export interface CounterLawsuitComplaintDraftDiagnostic {
+  code: string;
+  severity: "info" | "warning" | "error";
+  message: string;
+  sourceDocumentKey?: string;
+  sourceTaskId?: string;
+  claimId?: string;
+  elementId?: string;
+  allegationId?: string;
+  paragraphId?: string;
+}
+
+export interface CounterLawsuitComplaintDraftSummary {
+  runId: string;
+  status: "completed" | "partial" | "blocked" | "failed" | "not-run";
+  draftComplaintDocumentKey?: "draft-counter-lawsuit-complaint" | string;
+  statusDocumentKey?: "draft-counter-lawsuit-complaint-status" | string;
+  sectionCount: number;
+  paragraphCount: number;
+  claimDraftCount: number;
+  sourceReferenceCount: number;
+  sourcePathCount: number;
+  missingProofCount: number;
+  unresolvedGapCount: number;
+  diagnostics: CounterLawsuitComplaintDraftDiagnostic[];
+  safetyNotice: string;
+}
+
+export interface CounterLawsuitComplaintDraftRetryInput {
+  force?: boolean;
+}
+
 export interface StartCounterLawsuitPrototypeWorkflowResponse {
   runId: string;
   status: CounterLawsuitWorkflowRunStatus;
@@ -8551,6 +8583,7 @@ export interface StartCounterLawsuitPrototypeWorkflowResponse {
   researchMemo?: CounterLawsuitResearchMemoSummary;
   evidenceLedger?: CounterLawsuitEvidenceLedgerSummary;
   claimMap?: CounterLawsuitClaimMapSummary;
+  draftComplaint?: CounterLawsuitComplaintDraftSummary;
 }
 
 export interface CounterLawsuitWorkflowRunStatusResponse {
@@ -8567,6 +8600,7 @@ export interface CounterLawsuitWorkflowRunStatusResponse {
   researchMemo?: CounterLawsuitResearchMemoSummary;
   evidenceLedger?: CounterLawsuitEvidenceLedgerSummary;
   claimMap?: CounterLawsuitClaimMapSummary;
+  draftComplaint?: CounterLawsuitComplaintDraftSummary;
 }
 
 export function startCounterLawsuitPrototypeWorkflow(
@@ -8654,6 +8688,20 @@ export function runCounterLawsuitPrototypeClaimMap(
 ): Promise<CounterLawsuitClaimMapSummary> {
   return api<CounterLawsuitClaimMapSummary>(
     withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/claim-map`, projectId),
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function runCounterLawsuitPrototypeDraftComplaint(
+  runId: string,
+  input: CounterLawsuitComplaintDraftRetryInput = {},
+  projectId?: string,
+): Promise<CounterLawsuitComplaintDraftSummary> {
+  return api<CounterLawsuitComplaintDraftSummary>(
+    withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/draft-counter-lawsuit-complaint`, projectId),
     {
       method: "POST",
       body: JSON.stringify(input),

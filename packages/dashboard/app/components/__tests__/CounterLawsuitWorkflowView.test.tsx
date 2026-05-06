@@ -31,10 +31,10 @@ describe("CounterLawsuitWorkflowView", () => {
     expect(screen.getByRole("heading", { name: "Human verification required" })).toBeInTheDocument();
     expect(screen.getByText("Research memo")).toBeInTheDocument();
     expect(screen.getByText("Evidence ledger")).toBeInTheDocument();
-    expect(screen.getByText("Claim map")).toBeInTheDocument();
+    expect(screen.getByText("Claim and counterclaim map")).toBeInTheDocument();
     expect(screen.getByText("Draft counter-lawsuit complaint")).toBeInTheDocument();
     expect(screen.getByText("Opposing-counsel red-team report")).toBeInTheDocument();
-    expect(screen.getByText("Lineage/scoring log")).toBeInTheDocument();
+    expect(screen.getByText("Lineage and scoring log")).toBeInTheDocument();
   });
 
   it("shows an accessible validation error when the matter name is missing", async () => {
@@ -120,6 +120,7 @@ describe("CounterLawsuitWorkflowView", () => {
       message: "Run accepted",
       artifacts: [
         { id: "claim-map", label: "Claim map", status: "queued" },
+        { id: "draft-counter-lawsuit-complaint", label: "Draft counter-lawsuit complaint", status: "pending" },
         { id: "red-team-report", label: "Opposing-counsel red-team report", status: "pending" },
       ],
     });
@@ -134,6 +135,7 @@ describe("CounterLawsuitWorkflowView", () => {
     expect(screen.getByText("FN-222")).toBeInTheDocument();
     const returnedArtifacts = screen.getByRole("list", { name: "Returned artifacts" });
     expect(within(returnedArtifacts).getByText("Claim map")).toBeInTheDocument();
+    expect(within(returnedArtifacts).getByText("Draft counter-lawsuit complaint")).toBeInTheDocument();
     expect(within(returnedArtifacts).getByText("Opposing-counsel red-team report")).toBeInTheDocument();
   });
 
