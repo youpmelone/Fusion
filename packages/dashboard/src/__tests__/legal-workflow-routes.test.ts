@@ -295,6 +295,9 @@ describe("legal workflow routes", () => {
     expect(body.vaultMining.safetyNotice).toContain("not legally verified");
     expect(body.authorityValidation).toMatchObject({ runId: body.runId, status: "partial", validatedCount: 0 });
     expect(body.authorityValidation.safetyNotice).toContain("not good-law verification");
+    expect(defaultStore.workflowSteps[0].prompt).toContain("draft-counter-lawsuit-complaint for draft complaint paragraphs");
+    expect(defaultStore.workflowSteps[0].prompt).toContain("draft-counter-lawsuit-complaint-status");
+    expect(defaultStore.workflowSteps[1].prompt).toContain("draft artifact to attack");
   });
 
   it("POST launch automatically runs bounded vault mining and returns the summary", async () => {

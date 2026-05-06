@@ -162,20 +162,20 @@ const SAFETY_WORKFLOW_STEP_INPUTS = [
   {
     templateId: "counter-lawsuit-citation-source-verification",
     name: "Counter-lawsuit citation/source verification",
-    description: "Requires source receipts and legal authority verification for legal workflow outputs.",
-    prompt: `Review the task output for citation and source support. Check task document key research-memo for source-linked evidence, authority record IDs, unresolved gaps, and lineage when it exists. Check task document key research-memo-status and REQUEST REVISION if blockers are unresolved. Check task document key evidence-ledger for source-linked fact rows, preliminary claim links, confidence labels, citation status, unresolved gaps, and absence of positive promotion or filing-ready claims when it exists. Check task document key evidence-ledger-status and REQUEST REVISION if it reports blocked, partial, failed, stale, or unresolved prerequisites. Check task document key claim-map for claim groups, element rows, allegation-to-evidence links, missing-proof entries, unresolved authority gaps, and absence of positive promotion or filing-ready claims when it exists. Check task document key claim-map-status and REQUEST REVISION if it reports blocked, partial, failed, stale, or unresolved prerequisites. Check task document key courtlistener-authority-validation when legal authorities are cited and the document exists. REQUEST REVISION if any factual claim, quotation, procedural assertion, claim-map allegation, or evidence reference lacks a source receipt. REQUEST REVISION if any cited legal authority is used as support without a matched CourtListener record when validation is available, or if missing, unmatched, ambiguous, or unavailable CourtListener results are presented as usable support. Do not pass unsupported facts, unverified authorities, invented citations, invented legal elements, promoted authorities, or filing-ready language. Explicitly labeled unverified authority notes may remain only as unresolved research gaps; they do not satisfy this completion gate as support.`, 
+    description: "Requires source receipts and legal authority lookup boundaries for legal workflow outputs.",
+    prompt: `Review the task output for citation and source support. Check task document key research-memo for source-linked evidence, authority record IDs, unresolved gaps, and lineage when it exists. Check task document key research-memo-status and REQUEST REVISION if blockers are unresolved. Check task document key evidence-ledger for source-linked fact rows, preliminary claim links, confidence labels, citation status, unresolved gaps, and absence of positive promotion or filing-ready claims when it exists. Check task document key evidence-ledger-status and REQUEST REVISION if it reports blocked, partial, failed, stale, or unresolved prerequisites. Check task document key claim-map for claim groups, element rows, allegation-to-evidence links, missing-proof entries, unresolved authority gaps, and absence of positive promotion or filing-ready claims when it exists. Check task document key claim-map-status and REQUEST REVISION if it reports blocked, partial, failed, stale, or unresolved prerequisites. Check task document key draft-counter-lawsuit-complaint for draft complaint paragraphs, source references, missing-proof blockers, unresolved authorities, red-team-pending labels, and absence of positive promoted or filing-ready language when it exists. Check task document key draft-counter-lawsuit-complaint-status and REQUEST REVISION if it reports blocked, partial, failed, stale, or unresolved prerequisites. Check task document key courtlistener-authority-validation when legal authorities are cited and the document exists, using it as lookup-only authority validation. REQUEST REVISION if any factual claim, quotation, procedural assertion, claim-map allegation, draft complaint paragraph, source reference, or evidence reference lacks a source receipt. REQUEST REVISION if any cited legal authority is used as support without a matched CourtListener record when validation is available, or if missing, unmatched, ambiguous, or unavailable CourtListener results are presented as usable support. Do not pass unsupported facts, unverified authorities, invented citations, invented legal elements, promoted authorities, verified-fact language, human-verification language, or filing-ready language. Explicitly labeled unverified authority notes may remain only as unresolved research gaps; they do not satisfy this completion gate as support.`,
   },
   {
     templateId: "counter-lawsuit-opposing-counsel-red-team",
     name: "Counter-lawsuit opposing-counsel red-team review",
     description: "Requires adversarial critique before legal workflow outputs can be treated as complete drafts.",
-    prompt: `Review the task output for adversarial analysis. REQUEST REVISION if it lacks opposing-counsel critique, fails to identify weaknesses and defenses, overstates claim strength, or treats draft strategy as reliable without human legal review.`,
+    prompt: `Review the task output for adversarial analysis. Treat task document key draft-counter-lawsuit-complaint as the draft artifact to attack when it exists, and check draft-counter-lawsuit-complaint-status for unresolved blockers before passing. REQUEST REVISION if the output lacks opposing-counsel critique of draft complaint paragraphs, source references, missing-proof blockers, unresolved authorities, placeholder pleading fields, and red-team-pending labels. REQUEST REVISION if it overstates claim strength or treats draft strategy as reliable, promoted, verified, human verified, good-law checked, citation-format validated, or filing-ready. This workflow step does not generate the FN-015 red-team report; it only guards completion until that downstream draft-only critique exists.`,
   },
   {
     templateId: "counter-lawsuit-lineage-preservation",
     name: "Counter-lawsuit lineage preservation",
     description: "Requires durable lineage for source, skill, stage, and artifact provenance.",
-    prompt: `Review the task output for lineage preservation. REQUEST REVISION if upstream task IDs, artifact document keys, source scope status, Codex skill names, source receipts, red-team findings, or verification limitations are missing from the output.`,
+    prompt: `Review the task output for lineage preservation. Check task document keys research-memo, evidence-ledger, claim-map, draft-counter-lawsuit-complaint, and their status documents when present. REQUEST REVISION if upstream task IDs, artifact document keys, source scope status, Codex skill names, source receipts, draft complaint paragraph IDs, source references, missing-proof blockers, red-team findings or red-team-pending labels, or verification limitations are missing from the output. REQUEST REVISION if draft-counter-lawsuit-complaint-status reports blocked, partial, failed, stale, or unresolved prerequisites that are omitted from lineage.`,
   },
 ] as const;
 
@@ -390,7 +390,7 @@ function buildSourceContext(normalized: NormalizedLaunchInput): string {
 
 function buildStageIntegrationHandoff(stage: StageDefinition["stage"]): string {
   if (stage === "research-memo") {
-    return "Before drafting the research memo, read task document key `vault-mining-receipts` as the required first source manifest when it exists. Treat every vault-mining receipt as source-linked but unverified until later safety gates pass. Read task document key `courtlistener-authority-validation` when it exists, and treat `research-memo-status` blockers as unresolved prerequisites.\n\n";
+    return "Before drafting the research memo, read task document key `vault-mining-receipts` as the required first source manifest when it exists. Treat every vault-mining receipt as source-linked but unverified. Read task document key `courtlistener-authority-validation` when it exists as lookup-only authority validation, and treat `research-memo-status` blockers as unresolved prerequisites.\n\n";
   }
   if (stage === "evidence-ledger") {
     return "Before drafting the evidence ledger, read task document key `research-memo` from the research-memo stage task when it exists. If task document key `research-memo-status` reports blocked, partial, or failed status, treat those entries as unresolved prerequisites rather than support. Do not depend on a pre-existing `evidence-ledger`; this stage creates it.\n\n";
@@ -398,12 +398,21 @@ function buildStageIntegrationHandoff(stage: StageDefinition["stage"]): string {
   if (stage === "claim-map") {
     return "Before drafting the claim map, read task document key `research-memo` from the research-memo stage task and read task document key `evidence-ledger` from the evidence-ledger stage task when they exist. If task document key `research-memo-status` or `evidence-ledger-status` reports blocked, partial, failed, stale, or unresolved prerequisites, treat those entries as unresolved prerequisites rather than support. Do not depend on a pre-existing `claim-map`; this stage creates it from the persisted evidence ledger only.\n\n";
   }
-  return "Before drafting this downstream artifact, read task document key `research-memo` from the research-memo stage task, task document key `evidence-ledger` from the evidence-ledger stage task, and task document key `claim-map` from the claim-map stage task when they exist. If task document key `research-memo-status`, `evidence-ledger-status`, or `claim-map-status` reports blocked, partial, failed, stale, or unresolved prerequisites, treat those entries as unresolved prerequisites rather than support.\n\n";
+  if (stage === "draft-counter-lawsuit-complaint") {
+    return "Before drafting the complaint scaffold, read task document key `claim-map` from the claim-map stage task when it exists. If task document key `claim-map-status` reports blocked, partial, failed, stale, or unresolved prerequisites, treat those entries as unresolved prerequisites rather than support. Do not depend on a pre-existing `draft-counter-lawsuit-complaint`; this stage creates it from the persisted claim map only.\n\n";
+  }
+  if (stage === "opposing-counsel-red-team-report") {
+    return "Before drafting the opposing-counsel red-team report, read task document key `claim-map` and task document key `claim-map-status` from the claim-map stage task, then read task document key `draft-counter-lawsuit-complaint` and task document key `draft-counter-lawsuit-complaint-status` from the draft complaint stage task when they exist. Treat claim-map-status and draft-counter-lawsuit-complaint-status blockers as unresolved prerequisites rather than support. The draft complaint is the artifact to attack; this stage must not promote it as reliable, verified, or filing-ready.\n\n";
+  }
+  if (stage === "lineage-scoring-log") {
+    return "Before drafting the lineage/scoring log, read task document keys `research-memo`, `evidence-ledger`, `claim-map`, `draft-counter-lawsuit-complaint`, and `red-team-report` when they exist, plus each companion status document including `draft-counter-lawsuit-complaint-status`. Treat blocked, partial, failed, stale, or unresolved status entries as unresolved prerequisites and preserve them in lineage instead of treating them as support.\n\n";
+  }
+  return "Before drafting this downstream artifact, read upstream task documents when they exist and treat companion status documents as unresolved prerequisites rather than support.\n\n";
 }
 
 function buildStageDocumentIntegrationExpectations(stage: StageDefinition["stage"]): string {
   if (stage === "research-memo") {
-    return "Read task document key `vault-mining-receipts` as the required first source manifest when present. It contains source-linked receipts only; it does not legally verify facts or validate citations. Read task document key `courtlistener-authority-validation` when present. Treat task document key `research-memo-status` blockers as unresolved prerequisites.\n\n";
+    return "Read task document key `vault-mining-receipts` as the required first source manifest when present. It contains source-linked receipts only; it does not legally verify facts or validate citations. Read task document key `courtlistener-authority-validation` when present as lookup-only authority validation. Treat task document key `research-memo-status` blockers as unresolved prerequisites.\n\n";
   }
   if (stage === "evidence-ledger") {
     return "Read task document key `research-memo` from the research-memo stage task before creating the evidence ledger. Treat task document key `research-memo-status` blocked, partial, or failed entries as unresolved prerequisites, not support. Do not depend on a pre-existing task document key `evidence-ledger`; this stage creates it.\n\n";
@@ -411,7 +420,16 @@ function buildStageDocumentIntegrationExpectations(stage: StageDefinition["stage
   if (stage === "claim-map") {
     return "Read task document key `research-memo` from the research-memo stage task and task document key `evidence-ledger` from the evidence-ledger stage task before creating the claim map when they exist. Treat task document key `research-memo-status` or `evidence-ledger-status` blocked, partial, failed, stale, or unresolved entries as unresolved prerequisites, not support. Do not depend on a pre-existing task document key `claim-map`; this stage creates it.\n\n";
   }
-  return "Read task document key `research-memo` from the research-memo stage task, task document key `evidence-ledger` from the evidence-ledger stage task, and task document key `claim-map` from the claim-map stage task before drafting this downstream artifact when they exist. Treat task document key `research-memo-status`, `evidence-ledger-status`, or `claim-map-status` blocked, partial, failed, stale, or unresolved entries as unresolved prerequisites, not support.\n\n";
+  if (stage === "draft-counter-lawsuit-complaint") {
+    return "Read task document key `claim-map` from the claim-map stage task before creating the complaint scaffold when it exists. If task document key `claim-map-status` reports blocked, partial, failed, stale, or unresolved prerequisites, treat those entries as unresolved prerequisites, not support. Do not depend on a pre-existing task document key `draft-counter-lawsuit-complaint`; this stage creates it.\n\n";
+  }
+  if (stage === "opposing-counsel-red-team-report") {
+    return "Read task document key `claim-map`, task document key `claim-map-status`, task document key `draft-counter-lawsuit-complaint`, and task document key `draft-counter-lawsuit-complaint-status` before drafting the red-team report when they exist. Treat claim-map-status and draft-counter-lawsuit-complaint-status blockers as unresolved prerequisites, not support. The draft complaint is the draft-only artifact to attack; do not promote it as verified, reliable, or filing-ready.\n\n";
+  }
+  if (stage === "lineage-scoring-log") {
+    return "Read task document keys `research-memo`, `evidence-ledger`, `claim-map`, `draft-counter-lawsuit-complaint`, and `red-team-report` when present, plus companion status documents including `draft-counter-lawsuit-complaint-status`. Preserve blocked, partial, failed, stale, and unresolved status entries as lineage limitations, not support.\n\n";
+  }
+  return "Read upstream task documents and companion status documents before drafting this downstream artifact when they exist. Treat unresolved status entries as prerequisites, not support.\n\n";
 }
 
 function buildStageDescription(params: {
@@ -444,7 +462,7 @@ Do not embed, rewrite, or vendor Codex legal skill content in this task. Invoke 
 ## Integration handoff
 ${buildStageIntegrationHandoff(stage.stage)}Mine facts through QMD MCP and Obsidian MCP when those integrations are available. Read task document key \`courtlistener-authority-validation\` when it exists before relying on legal authorities or citations; the manifest is expected on the research-memo stage task after validation runs.
 
-Treat missing, unmatched, ambiguous, or unavailable CourtListener results as unresolved authority gaps. The generated research memo is draft-only, source-linked only, not legal advice, not good-law verification, not citation-format validation, not filing-ready, and not promoted for filing. CourtListener lookup can identify a record or citation match, but it does not verify legal conclusions, good-law status, filing readiness, or attorney judgment.
+Treat missing, unmatched, ambiguous, or unavailable CourtListener results as unresolved authority gaps. CourtListener is lookup-only authority validation; it does not verify legal conclusions, good-law status, filing readiness, or attorney judgment. Generated legal artifacts are draft-only and source-linked only, including the research memo, evidence ledger, claim map, and draft complaint. They are not legal advice, not verified facts, not good-law verification, not citation-format validation, not filing-ready, not human verification, and not promoted for filing.
 
 If QMD MCP, Obsidian MCP, CourtListener, or any other integration is unavailable, explicitly mark the affected facts, evidence, authorities, or receipts as unverified. Do not invent citations, quotes, docket entries, CourtListener matches, or source receipts.
 
@@ -454,7 +472,7 @@ ${upstreamText}
 ## Required output
 Write the primary output to task document key \`${stage.documentKey}\`. The output must preserve source receipts, upstream task IDs, verification state, and unresolved gaps.
 
-All generated materials are drafts only. They are not legal advice and are not promoted, reliable, or ready for use until citation/source verification, opposing-counsel red-team review, and lineage preservation gates pass, followed by qualified human review.
+All generated materials are drafts only. They are not legal advice, not verified facts, not good-law verification, not citation-format validation, not filing-ready, not human verification, and not promoted for filing. Safety gates can surface blockers, but they do not create filing readiness or attorney review.
 
 ## Safety gates attached
 ${safetyStepIds.map((id) => `- ${id}`).join("\n")}
@@ -492,10 +510,10 @@ ${stage.promptPurpose}
 ## Integration expectations
 ${buildStageDocumentIntegrationExpectations(stage.stage)}Use existing installed Codex legal skills through assigned-agent metadata. Mine facts through QMD MCP and Obsidian MCP when available. Read task document key \`courtlistener-authority-validation\` when present before relying on authorities. Missing, unmatched, ambiguous, or unavailable CourtListener validation remains an unresolved authority gap; do not invent citations or CourtListener matches.
 
-The generated research memo is draft-only, source-linked only, not legal advice, not good-law verification, not citation-format validation, not filing-ready, and not promoted for filing. CourtListener lookup evidence does not verify legal conclusions, good-law status, filing readiness, or attorney judgment.
+CourtListener lookup evidence is lookup-only authority validation. It does not verify legal conclusions, good-law status, filing readiness, or attorney judgment. Generated legal artifacts are draft-only and source-linked only, including the research memo, evidence ledger, claim map, and draft complaint. They are not legal advice, not verified facts, not good-law verification, not citation-format validation, not filing-ready, not human verification, and not promoted for filing.
 
 ## Safety boundary
-Outputs are drafts only. They are not promoted or reliable until source/citation verification, opposing-counsel red-team review, lineage preservation, and qualified human verification pass.`;
+Outputs are drafts only. They are source-linked only and do not provide legal advice, verified facts, good-law verification, citation-format validation, filing readiness, human verification, or promotion.`;
 }
 
 function buildRunDocument(params: {
@@ -532,7 +550,7 @@ ${stageTasks.map((stage) => `${stage.stageIndex}. ${stage.stage} → ${stage.id}
 ## Safety boundary
 This server orchestration does not verify legal claims by itself. It only queues draft-producing tasks and attaches required safety workflow steps for later evidence, authority, red-team, lineage, and human verification.
 
-All generated outputs are drafts only. They are not promoted, reliable, or ready for use until citation/source verification, opposing-counsel red-team review, lineage preservation, and qualified human verification pass.`;
+All generated outputs are drafts only. They are source-linked only and do not provide legal advice, verified facts, good-law verification, citation-format validation, filing readiness, human verification, or promotion. The workflow preserves blockers for later review; it does not make any artifact filing-ready.`;
 }
 
 function buildStageTaskSummary(task: Task, stage: StageDefinition, stageIndex: number): CounterLawsuitStageTaskSummary {

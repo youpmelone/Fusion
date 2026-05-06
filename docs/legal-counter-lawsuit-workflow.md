@@ -118,6 +118,21 @@ The response keeps the FN-001 dashboard contract and adds orchestration details:
     diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string; claimId?: string; elementId?: string; allegationId?: string; factId?: string }>;
     safetyNotice: string;
   };
+  draftComplaint: {
+    runId: string;
+    status: "completed" | "partial" | "blocked" | "failed" | "not-run";
+    draftComplaintDocumentKey?: "draft-counter-lawsuit-complaint";
+    statusDocumentKey?: "draft-counter-lawsuit-complaint-status";
+    sectionCount: number;
+    paragraphCount: number;
+    claimDraftCount: number;
+    sourceReferenceCount: number;
+    sourcePathCount: number;
+    missingProofCount: number;
+    unresolvedGapCount: number;
+    diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string; claimId?: string; elementId?: string; allegationId?: string; paragraphId?: string }>;
+    safetyNotice: string;
+  };
 }
 ```
 
@@ -132,6 +147,10 @@ After vault mining and CourtListener validation are attempted, Fusion generates 
 After research memo generation is attempted, Fusion generates the structured `evidence-ledger` task document on the evidence-ledger stage task. The ledger is deterministic from persisted `research-memo` and `research-memo-status` documents only. API callers cannot submit ledger text, fact rows, claim mappings, confidence scores, citation statuses, source manifests, source paths, CourtListener records, external command configuration, tokens, headers, or raw fetch options.
 
 After evidence ledger generation is attempted, Fusion generates the structured `claim-map` task document on the claim-map stage task. The claim map is deterministic from persisted `evidence-ledger` and `evidence-ledger-status` documents, with safe research memo conclusion labels used only for labels. API callers cannot submit claim-map text, legal elements, allegations, evidence mappings, confidence scores, source paths, CourtListener records, external commands, tokens, headers, or raw fetch options.
+
+After claim-map generation is attempted, Fusion generates the deterministic `draft-counter-lawsuit-complaint` task document on the draft-complaint stage task. The draft complaint is built only from the persisted `claim-map` and `claim-map-status` documents. API callers cannot submit pleading text, legal theories, parties, jurisdiction, venue, damages, requested relief, source manifests, source paths, CourtListener records, external commands, tokens, headers, or raw fetch options from the request body.
+
+Complaint draft generation is best-effort during launch. A draft failure does not roll back the workflow run; the launch response returns `draftComplaint.status: "failed"`, `"blocked"`, or `"partial"` with diagnostics, and the retry endpoint can regenerate from the persisted prerequisite documents.
 
 ## Vault-mining MCP setup
 
@@ -272,6 +291,26 @@ Unknown fields return `400`. Unknown run IDs return `404`.
 
 The response shape is the same `claimMap` summary returned by launch and status. `force: true` asks Fusion to regenerate from persisted evidence ledger documents, but it still does not accept generated claim-map text, legal elements, allegations, evidence mappings, source paths, confidence scores, CourtListener records, external commands, tokens, headers, or raw fetch options from the request body.
 
+## Draft complaint retry API
+
+Generate or retry the draft counter-lawsuit complaint scaffold for an existing run with:
+
+```http
+POST /api/legal-workflows/counter-lawsuit/runs/:runId/draft-counter-lawsuit-complaint
+```
+
+The request body accepts only:
+
+```ts
+{
+  force?: boolean;
+}
+```
+
+Unknown fields return `400`. Unknown run IDs return `404`.
+
+The response shape is the same `draftComplaint` summary returned by launch and status. `force: true` asks Fusion to regenerate from persisted claim-map documents, but it still does not accept generated complaint text, pleading sections, legal theories, parties, jurisdiction, venue, relief, source manifests, source paths, CourtListener records, external commands, tokens, headers, or raw fetch options from the request body.
+
 ## Status API
 
 Fetch derived run status with:
@@ -280,7 +319,7 @@ Fetch derived run status with:
 GET /api/legal-workflows/counter-lawsuit/runs/:runId
 ```
 
-The status endpoint finds tasks whose `sourceMetadata.workflowRunId` matches the run ID. It returns the stage task statuses, artifact keys, safety gates, source scope status, lineage document references, the current vault-mining summary, the current CourtListener authority-validation summary, the current research memo summary, the current evidence ledger summary, and the current claim-map summary.
+The status endpoint finds tasks whose `sourceMetadata.workflowRunId` matches the run ID. It returns the stage task statuses, artifact keys, safety gates, source scope status, lineage document references, the current vault-mining summary, the current CourtListener authority-validation summary, the current research memo summary, the current evidence ledger summary, the current claim-map summary, and the current draft complaint summary.
 
 The `authorityValidation` status includes the research run ID, candidate count, matched count, unmatched/ambiguous/unavailable count, diagnostics, safety notice, and document key references for `courtlistener-authority-validation` and `courtlistener-status` when present.
 
@@ -289,6 +328,8 @@ The `researchMemo` status includes status, memo document key, status document ke
 The `evidenceLedger` status includes status, ledger document key, status document key when present, fact count, source-link count, preliminary claim-link count, unresolved gap count, citation-status counts, confidence counts, diagnostics, and safety notice. If `evidence-ledger-status` reports blocked, partial, failed, stale, or unresolved prerequisites, status preserves that blocker instead of treating a stale primary ledger as completed support. If neither ledger document exists, status is `not-run`.
 
 The `claimMap` status includes status, claim-map document key, status document key when present, claim count, element count, allegation count, supporting-evidence count, missing-proof count, unresolved gap count, diagnostics, and safety notice. If `claim-map-status` reports blocked, partial, failed, stale, or unresolved prerequisites, status preserves that blocker instead of treating a stale primary claim map as completed support. Older runs without a claim-map stage return `claimMap.status: "not-run"` while preserving earlier summaries.
+
+The `draftComplaint` status includes status, draft complaint document key, status document key when present, section count, numbered paragraph count, claim-draft count, source-reference count, source-path count, missing-proof count, unresolved gap count, diagnostics, and safety notice. If `draft-counter-lawsuit-complaint-status` reports blocked, partial, failed, stale, or unresolved prerequisites, status preserves that blocker instead of treating a stale primary complaint document as completed support. Older runs without a draft-complaint stage return `draftComplaint.status: "not-run"` while preserving earlier summaries.
 
 Unknown run IDs return `404`.
 
@@ -320,6 +361,8 @@ After research memo generation runs, the research memo task receives `research-m
 After evidence ledger generation runs, the evidence-ledger task receives `evidence-ledger`. When generation is blocked, partial, failed, or stale because of `research-memo-status`, Fusion also writes `evidence-ledger-status`. The claim-map stage reads `evidence-ledger` when it exists and treats `evidence-ledger-status` blockers as unresolved prerequisites, not support.
 
 After claim-map generation runs, the claim-map task receives `claim-map`. When generation is blocked, partial, failed, or stale because of `evidence-ledger-status`, Fusion also writes `claim-map-status`. Complaint-drafting and later stages read `claim-map` when it exists and treat `claim-map-status` blockers as unresolved prerequisites, not support.
+
+After draft complaint generation runs, the draft-complaint task receives `draft-counter-lawsuit-complaint`. Fusion always rewrites this primary document when generation is attempted, even when blocked, so stale complaint text cannot be mistaken for current support. When generation is blocked, partial, failed, or stale because of `claim-map-status`, Fusion also writes `draft-counter-lawsuit-complaint-status`. FN-015 opposing-counsel red-team work should use these documents as its prerequisite input and treat any status blockers, missing-proof entries, red-team-pending marker, unresolved authorities, missing source paths, or human verification requirements as unresolved drafting risk, not as support.
 
 ## Vault-mining receipt schema
 
@@ -520,6 +563,45 @@ The claim map is draft-only and source-linked only. It is not legal advice, not 
 
 Raw MCP payloads, full note bodies, CourtListener raw payloads, authorization headers, API tokens, token-like provider errors, and unbounded source text are not persisted in the claim map, claim-map status, metadata, or API responses.
 
+## Draft complaint document schema
+
+The `draft-counter-lawsuit-complaint` task document contains Markdown for review plus a safe JSON manifest. The Markdown is a pleading scaffold only. It uses deterministic sections, numbered paragraphs, claim-draft rows, source-reference rows, missing-proof rows, filing blockers, diagnostics, and the safety notice.
+
+The safe manifest uses this shape:
+
+```ts
+{
+  runId: string;
+  status: "completed" | "partial" | "blocked" | "failed";
+  generatedAt: string;
+  sourceDocuments: Array<{ documentKey: "claim-map" | "claim-map-status"; taskId?: string; status?: string }>;
+  claimMapTaskId?: string;
+  draftComplaintTaskId: string;
+  draftComplaintDocumentKey: "draft-counter-lawsuit-complaint";
+  statusDocumentKey?: "draft-counter-lawsuit-complaint-status";
+  sections: Array<{ sectionId: string; title: string; status: "draft" | "placeholder" | "blocked"; paragraphIds: string[]; unresolvedDraftOnly: boolean }>;
+  paragraphs: Array<{ paragraphId: string; paragraphNumber: number; text: string; claimId?: string; elementId?: string; allegationId?: string; factId?: string; sourcePaths: string[]; receiptIds: string[]; supportingEvidenceIds: string[]; authorityRecordIds: string[]; citationStatusIds: string[]; verified: false; filingReady: false; unresolvedDraftOnly: boolean }>;
+  claimDrafts: Array<{ claimDraftId: string; claimId: string; label: string; elementIds: string[]; paragraphIds: string[]; supportingEvidenceIds: string[]; sourcePaths: string[]; authorityRecordIds: string[]; citationStatusIds: string[]; missingProofIds: string[]; verified: false; filingReady: false; unresolvedDraftOnly: boolean }>;
+  sourceReferences: Array<{ sourceReferenceId: string; sourcePath: string; receiptIds: string[]; claimIds: string[]; paragraphIds: string[]; citationStatusIds: string[]; verified: false }>;
+  missingProof: Array<{ missingProofId: string; scope: string; severity: "info" | "warning" | "error"; reason: string; claimId?: string; elementId?: string; allegationId?: string; factId?: string; unresolved: true }>;
+  diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string; claimId?: string; elementId?: string; allegationId?: string; paragraphId?: string }>;
+  counts: { sections: number; paragraphs: number; claimDrafts: number; sourceReferences: number; sourcePaths: number; missingProof: number; unresolvedGaps: number };
+  safetyNotice: string;
+}
+```
+
+Complaint sections are generated from the claim map and never from request-body facts. Placeholder sections for parties, jurisdiction, venue, damages, and relief remain explicitly unresolved unless an upstream claim-map row provides source-linked support.
+
+Missing claim maps, blocked `claim-map-status`, malformed manifests, missing source paths, unsupported allegations, unresolved authorities, missing legal elements, red-team-pending state, and human citation/source verification requirements remain visible as diagnostics, missing-proof entries, filing blockers, or status entries.
+
+The `draft-counter-lawsuit-complaint-status` document records blocked, partial, failed, or stale-blocker state with the same safe counts, diagnostics, document keys, filing blockers, missing-proof counts, and safety notice. A stale or malformed primary draft is not treated as completed.
+
+The complaint draft is draft-only and source-linked only. It is not legal advice, not verified fact support, not good-law verification, not citation-format validation, not filing-ready, not human verified, and not promoted for filing. It does not create the opposing-counsel red-team report, lineage/scoring log, final citation validation, good-law verification, attorney review, or filing workflow.
+
+Raw MCP payloads, full note bodies, CourtListener raw payloads, authorization headers, API tokens, token-like provider errors, and unbounded source text are not persisted in the complaint draft, complaint status, metadata, or API responses.
+
+FN-015 should start from the canonical `draft-counter-lawsuit-complaint` document key and its companion status document, then produce the opposing-counsel red-team report as a separate downstream artifact.
+
 ## Agents and Codex legal skills
 
 The server creates or reuses durable legal workflow agents. It does not create ephemeral runtime agents for this workflow.
@@ -534,9 +616,11 @@ Every generated stage task enables three prompt-mode pre-merge workflow steps:
 - Opposing-counsel red-team review
 - Lineage preservation
 
-The citation/source prompt checks `research-memo` for source-linked evidence, matched authorities when used as support, unresolved gaps, and lineage. It checks `research-memo-status` for unresolved blockers. It checks `evidence-ledger` for source-linked fact rows, preliminary claim links, confidence labels, citation status, unresolved gaps, and absence of positive promotion or filing-ready claims. It checks `evidence-ledger-status` for blocked, partial, failed, stale, or unresolved prerequisites. It checks `claim-map` for claim groups, element rows, allegation-to-evidence links, missing-proof entries, unresolved authority gaps, and absence of positive promotion or filing-ready claims. It checks `claim-map-status` for blocked, partial, failed, stale, or unresolved prerequisites. It also checks `courtlistener-authority-validation` when legal authorities are cited and the document exists.
+The citation/source prompt checks `research-memo` for source-linked evidence, matched authorities when used as support, unresolved gaps, and lineage. It checks `research-memo-status` for unresolved blockers. It checks `evidence-ledger` for source-linked fact rows, preliminary claim links, confidence labels, citation status, unresolved gaps, and absence of positive promotion or filing-ready claims. It checks `evidence-ledger-status` for blocked, partial, failed, stale, or unresolved prerequisites. It checks `claim-map` for claim groups, element rows, allegation-to-evidence links, missing-proof entries, unresolved authority gaps, and absence of positive promotion or filing-ready claims. It checks `claim-map-status` for blocked, partial, failed, stale, or unresolved prerequisites. It checks `draft-counter-lawsuit-complaint` for draft complaint paragraphs, source references, missing-proof blockers, unresolved authorities, red-team-pending labels, and absence of promoted or filing-ready language. It checks `draft-counter-lawsuit-complaint-status` for blocked, partial, failed, stale, or unresolved prerequisites. It also checks `courtlistener-authority-validation` when legal authorities are cited and the document exists.
 
-It requires `REQUEST REVISION` when an authority is used as support without a matched CourtListener record, or when missing, unmatched, ambiguous, or unavailable CourtListener results are presented as support. Explicitly labeled unverified authority notes may remain only as unresolved research gaps; they do not satisfy the completion gate as support.
+It requires `REQUEST REVISION` when an authority is used as support without a matched CourtListener record, or when missing, unmatched, ambiguous, or unavailable CourtListener results are presented as support. It also requires revision when draft complaint paragraphs, source references, missing-proof blockers, unresolved authorities, or red-team-pending labels are omitted from the safety review. Explicitly labeled unverified authority notes may remain only as unresolved research gaps; they do not satisfy the completion gate as support.
+
+The opposing-counsel red-team prompt treats `draft-counter-lawsuit-complaint` as the artifact to attack and checks `draft-counter-lawsuit-complaint-status` before passing. It does not generate the FN-015 report in this task; it prevents downstream completion from treating the draft complaint as promoted, reliable, verified, good-law checked, citation-format validated, human verified, or filing-ready.
 
 ## Optional source scope behavior
 
@@ -548,8 +632,8 @@ When no `vaultScope`, `sourceScope`, or `sourceQuery` is supplied, the run recor
 
 ## Integration boundaries
 
-This workflow now mines QMD MCP and Obsidian MCP for source-linked local receipts, uses CourtListener for bounded authority lookup when candidates are available, generates a source-linked draft research memo from those persisted manifests, generates a structured evidence ledger from the persisted memo documents, and generates a structured claim map from the persisted evidence ledger documents.
+This workflow now mines QMD MCP and Obsidian MCP for source-linked local receipts, uses CourtListener for bounded authority lookup when candidates are available, generates a source-linked draft research memo from those persisted manifests, generates a structured evidence ledger from the persisted memo documents, generates a structured claim map from the persisted evidence ledger documents, and generates a deterministic draft complaint scaffold from the persisted claim-map documents.
 
 CourtListener can confirm that a citation or query maps to a CourtListener record or candidate match. It does not Shepardize, determine good-law status, verify legal conclusions, check final filing citation format, decide filing readiness, generate filings, or replace attorney judgment.
 
-Stage prompts instruct agents to use integrations when available and to mark unavailable integration results as unverified. Outputs, mined receipts, authority-validation records, generated research memos, generated evidence ledgers, and generated claim maps are drafts or source manifests only. They are not promoted, reliable, or ready for use until citation/source verification, opposing-counsel red-team review, lineage preservation, and qualified human verification pass.
+Stage prompts instruct agents to use integrations when available and to mark unavailable integration results as unverified. Outputs, mined receipts, authority-validation records, generated research memos, generated evidence ledgers, generated claim maps, and generated complaint drafts are drafts or source manifests only. They are source-linked only, not legal advice, not verified facts, not good-law verification, not citation-format validation, not filing-ready, not human verification, and not promoted for filing. FN-015 is the downstream handoff for the opposing-counsel red-team report; FN-010 remains the downstream handoff for lineage/scoring work.
