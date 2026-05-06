@@ -169,13 +169,26 @@ describe("red-team report input collection", () => {
     expect(JSON.stringify(result)).toContain("[REDACTED]");
   });
 
+  it("uses the primary complaint manifest status when no status document exists", async () => {
+    const store = new FakeTaskStore();
+    seedComplaint(store, { manifest: complaintManifest({ status: "blocked" }) });
+    const result = await collectCounterLawsuitRedTeamInputs({ taskStore: store as never, runId: "CLW-1" });
+    expect(result.status).toBe("blocked");
+    expect(result.statusDocumentKey).toBe(RED_TEAM_REPORT_STATUS_DOCUMENT_KEY);
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "draft-complaint-status-blocker", sourceDocumentKey: DRAFT_COMPLAINT_DOCUMENT_KEY }),
+    ]));
+  });
+
   it("returns not-run for older runs that do not have a red-team stage", async () => {
     const store = new FakeTaskStore();
     store.tasks = [makeTask("FN-3", "claim-map"), makeTask("FN-4", "draft-counter-lawsuit-complaint")];
     seedComplaint(store);
     const collected = await collectCounterLawsuitRedTeamInputs({ taskStore: store as never, runId: "CLW-1" });
     expect(collected.status).toBe("not-run");
-    expect(redTeamSummaryFromResult(collected)).toMatchObject({ status: "not-run", redTeamReportDocumentKey: undefined });
+    expect(collected.findings).toEqual([]);
+    expect(collected.counts.reviewedParagraphs).toBe(0);
+    expect(redTeamSummaryFromResult(collected)).toMatchObject({ status: "not-run", redTeamReportDocumentKey: undefined, reviewedParagraphCount: 0 });
     await expect(deriveRedTeamReportStatusForRun({ taskStore: store as never, runId: "CLW-1" })).resolves.toMatchObject({ status: "not-run" });
   });
 
@@ -203,14 +216,17 @@ describe("red-team report input collection", () => {
         diagnostics: [{
           code: "provider-error",
           severity: "warning",
-          message: `Provider failed with --obsidian-api-key super-secret-token-value and ${"long ".repeat(300)}`,
+          message: `Provider failed with --obsidian-api-key super-secret-token-value and --qmd-token --auth-token ${"long ".repeat(300)}`,
         }],
       }),
     });
     const result = await collectCounterLawsuitRedTeamInputs({ taskStore: store as never, runId: "CLW-1" });
     const serialized = JSON.stringify(result);
     expect(serialized).toContain("[REDACTED]");
+    expect(serialized).toContain("[REDACTED-FLAG]");
     expect(serialized).not.toContain("super-secret-token-value");
+    expect(serialized).not.toContain("--qmd-token");
+    expect(serialized).not.toContain("--auth-token");
     expect(result.diagnostics[0].message.length).toBeLessThanOrEqual(500);
   });
 

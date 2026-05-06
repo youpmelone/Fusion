@@ -1,14 +1,15 @@
 import type { Task, TaskDocument, TaskStore } from "@fusion/core";
 import { notFound } from "./api-error.js";
+import {
+  DRAFT_COMPLAINT_DOCUMENT_KEY,
+  DRAFT_COMPLAINT_STATUS_DOCUMENT_KEY,
+} from "./legal-complaint-draft.js";
 import { CLAIM_MAP_DOCUMENT_KEY } from "./legal-claim-map.js";
 import { COUNTER_LAWSUIT_WORKFLOW_KIND } from "./legal-workflow-orchestrator.js";
 
 export const RED_TEAM_REPORT_DOCUMENT_KEY = "red-team-report";
 export const RED_TEAM_REPORT_STATUS_DOCUMENT_KEY = "red-team-report-status";
 export const RED_TEAM_REPORT_SAFETY_NOTICE = "Draft-only opposing-counsel red-team critique generated from the persisted draft complaint manifest. It is adversarial issue spotting only, source-linked only, unverified, not legal advice, not good-law verification, not citation-format validation, not a real motion-practice decision, not filing-ready, and not promoted for filing.";
-
-const DRAFT_COMPLAINT_DOCUMENT_KEY = "draft-counter-lawsuit-complaint";
-const DRAFT_COMPLAINT_STATUS_DOCUMENT_KEY = "draft-counter-lawsuit-complaint-status";
 
 export type RedTeamStatus = "completed" | "partial" | "blocked" | "failed" | "stale" | "not-run";
 export type RedTeamSeverity = "info" | "warning" | "high" | "blocker";
@@ -172,11 +173,13 @@ const MAX_DIAGNOSTICS = 50;
 const AUTH_HEADER_RE = /(["']?(?:authorization)["']?\s*[:=]\s*["']?)(?!\[REDACTED\])[^"'\n\r,}]+/gi;
 const TOKEN_RE = /["']?(?:token|secret|api[_-]?key|password|credential|auth)["']?\s*[:=]\s*["']?[^"'\s,}]{8,}["']?|bearer\s+\S{8,}|Token\s+\S{8,}|(?:sk|pk|ghp|github_pat|obsidian)[A-Za-z0-9_:\-.=+/]{8,}/gi;
 const SECRET_FLAG_VALUE_RE = /(--[A-Za-z0-9_.-]*(?:token|secret|key|password|credential|auth)[A-Za-z0-9_.-]*)(\s+)(?:"[^"]+"|'[^']+'|\S+)/gi;
+const SECRET_FLAG_STANDALONE_RE = /--[A-Za-z0-9_.-]*(?:token|secret|key|password|credential|auth)[A-Za-z0-9_.-]*/gi;
 
 function redactSecrets(value: string): string {
   return value
     .replace(AUTH_HEADER_RE, "$1[REDACTED]")
     .replace(SECRET_FLAG_VALUE_RE, "$1$2[REDACTED]")
+    .replace(SECRET_FLAG_STANDALONE_RE, "[REDACTED-FLAG]")
     .replace(TOKEN_RE, "[REDACTED]");
 }
 
@@ -313,13 +316,13 @@ function statusFromManifest(manifest: Record<string, unknown> | undefined): stri
   return boundedText(manifest?.status, 80);
 }
 
-function statusDiagnostic(status: string | undefined, taskId: string | undefined): RedTeamDiagnostic[] {
+function statusDiagnostic(status: string | undefined, taskId: string | undefined, sourceDocumentKey: string): RedTeamDiagnostic[] {
   if (!status || status === "completed") return [];
   return [{
     code: "draft-complaint-status-blocker",
     severity: status === "failed" || status === "blocked" ? "error" : "warning",
-    message: `${DRAFT_COMPLAINT_STATUS_DOCUMENT_KEY} reports ${status}. The red-team report cannot treat the draft complaint as completed support.`,
-    sourceDocumentKey: DRAFT_COMPLAINT_STATUS_DOCUMENT_KEY,
+    message: `${sourceDocumentKey} reports ${status}. The red-team report cannot treat the draft complaint as completed support.`,
+    sourceDocumentKey,
     sourceTaskId: taskId,
   }];
 }
@@ -595,14 +598,17 @@ export async function collectCounterLawsuitRedTeamInputs(options: CollectCounter
       { document: null, source: "missing", manifest: undefined, diagnostics: [] } satisfies ParsedDocument,
       { document: null, source: "missing", manifest: undefined, diagnostics: [] } satisfies ParsedDocument,
     ];
-  const complaintStatusValue = statusFromManifest(complaintStatus.manifest);
+  const primaryComplaintStatusValue = statusFromManifest(complaint.manifest);
+  const statusDocumentValue = statusFromManifest(complaintStatus.manifest);
+  const complaintStatusValue = statusDocumentValue ?? primaryComplaintStatusValue;
+  const complaintStatusSourceDocumentKey = statusDocumentValue ? DRAFT_COMPLAINT_STATUS_DOCUMENT_KEY : DRAFT_COMPLAINT_DOCUMENT_KEY;
   const diagnostics = normalizeDiagnostics(
     missingStageDiagnostics,
     complaint.diagnostics,
     complaintStatus.document ? complaintStatus.diagnostics : [],
     normalizeManifestDiagnostics(complaint.manifest),
     normalizeManifestDiagnostics(complaintStatus.manifest),
-    statusDiagnostic(complaintStatusValue, draftComplaintTask?.id),
+    statusDiagnostic(complaintStatusValue, draftComplaintTask?.id, complaintStatusSourceDocumentKey),
   );
   const baseStatus = deriveStatus({
     redTeamStagePresent: Boolean(redTeamTask),
@@ -612,9 +618,23 @@ export async function collectCounterLawsuitRedTeamInputs(options: CollectCounter
     complaintStatus: complaintStatusValue,
     diagnostics,
   });
-  const rows = makeRedTeamRows(complaint.manifest, diagnostics, complaintStatusValue);
+  const rows = redTeamTask
+    ? makeRedTeamRows(complaint.manifest, diagnostics, complaintStatusValue)
+    : { findings: [], mtdAttacks: [], citationIssues: [], revisionRecommendations: [] };
   const status = statusWithRows(baseStatus, rows);
-  const counts = countsWithRows(countsFromComplaintManifest(complaint.manifest), rows);
+  const counts = redTeamTask
+    ? countsWithRows(countsFromComplaintManifest(complaint.manifest), rows)
+    : {
+      findings: 0,
+      mtdAttacks: 0,
+      citationIssues: 0,
+      revisionRecommendations: 0,
+      unresolvedBlockers: 0,
+      reviewedParagraphs: 0,
+      reviewedClaims: 0,
+      sourceReferences: 0,
+      sourcePaths: 0,
+    };
   const effectiveStatusDocumentKey = status === "completed" || status === "not-run" ? undefined : RED_TEAM_REPORT_STATUS_DOCUMENT_KEY;
   return {
     runId: options.runId,
