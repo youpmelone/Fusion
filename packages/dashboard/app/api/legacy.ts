@@ -8406,6 +8406,37 @@ export interface CounterLawsuitVaultMiningRetryInput {
   obsidian?: { serverName?: string; searchToolName?: string; readToolName?: string };
 }
 
+export interface CounterLawsuitAuthorityValidationDiagnostic {
+  providerName: "courtlistener" | string;
+  status: "available" | "partial" | "unavailable" | "error" | "skipped";
+  message: string;
+  endpoint?: string;
+  candidate?: string;
+  acceptedCount?: number;
+  rejectedCount?: number;
+}
+
+export interface CounterLawsuitAuthorityValidationSummary {
+  runId: string;
+  status: "completed" | "partial" | "unavailable" | "no-candidates" | "failed" | "not-run";
+  researchRunId?: string;
+  candidateCount: number;
+  validatedCount: number;
+  unmatchedCount: number;
+  diagnostics: CounterLawsuitAuthorityValidationDiagnostic[];
+  authorityValidationDocumentKey?: "courtlistener-authority-validation" | string;
+  statusDocumentKey?: "courtlistener-status" | string;
+  safetyNotice: string;
+}
+
+export interface CounterLawsuitAuthorityValidationRetryInput {
+  citations?: string[];
+  queries?: string[];
+  text?: string;
+  maxCandidates?: number;
+  maxResultsPerCandidate?: number;
+}
+
 export interface StartCounterLawsuitPrototypeWorkflowResponse {
   runId: string;
   status: CounterLawsuitWorkflowRunStatus;
@@ -8423,6 +8454,7 @@ export interface StartCounterLawsuitPrototypeWorkflowResponse {
   codexSkillNames?: string[];
   codexSkillSource?: "default" | "user";
   vaultMining?: CounterLawsuitVaultMiningSummary;
+  authorityValidation?: CounterLawsuitAuthorityValidationSummary;
 }
 
 export interface CounterLawsuitWorkflowRunStatusResponse {
@@ -8435,6 +8467,7 @@ export interface CounterLawsuitWorkflowRunStatusResponse {
   sourceScopeStatus: "specified" | "unspecified";
   lineageDocuments: Array<{ taskId: string; documentKey: string; stage: string }>;
   vaultMining?: CounterLawsuitVaultMiningSummary;
+  authorityValidation?: CounterLawsuitAuthorityValidationSummary;
 }
 
 export function startCounterLawsuitPrototypeWorkflow(
@@ -8466,6 +8499,20 @@ export function runCounterLawsuitPrototypeVaultMining(
 ): Promise<CounterLawsuitVaultMiningSummary> {
   return api<CounterLawsuitVaultMiningSummary>(
     withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/vault-mining`, projectId),
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function runCounterLawsuitPrototypeAuthorityValidation(
+  runId: string,
+  input: CounterLawsuitAuthorityValidationRetryInput = {},
+  projectId?: string,
+): Promise<CounterLawsuitAuthorityValidationSummary> {
+  return api<CounterLawsuitAuthorityValidationSummary>(
+    withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/authority-validation`, projectId),
     {
       method: "POST",
       body: JSON.stringify(input),
