@@ -83,12 +83,58 @@ test("test:full raw log tail keeps the last requested lines", () => {
   assert.equal(tailLines("one\ntwo\nthree", 2), "two\nthree");
 });
 
-test("test:full raw does not turn SIGKILL-style package failures into success", () => {
+function runLoggedFixture(commandSource) {
   const logPath = path.join(mkdtempSync(path.join(tmpdir(), "fusion-test-full-")), "package.log");
   const moduleUrl = pathToFileURL(path.resolve("scripts/test-full-raw.mjs")).href;
   const script = `
     import { runLogged } from ${JSON.stringify(moduleUrl)};
-    runLogged(process.execPath, ["-e", "console.error('worker died with SIGKILL / exit code 137'); process.exit(137)"], {
+    runLogged(process.execPath, ["-e", ${JSON.stringify(commandSource)}], {
+      env: { ...process.env, FUSION_TEST_FULL_LOG: ${JSON.stringify(logPath)} },
+    });
+  `;
+
+  return spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    encoding: "utf-8",
+  });
+}
+
+test("test:full raw does not turn SIGKILL-style package failures into success", () => {
+  const result = runLoggedFixture("console.error('worker died with SIGKILL / exit code 137'); process.exit(137)");
+
+  assert.equal(result.status, 137);
+  assert.match(result.stderr, /worker died with SIGKILL \/ exit code 137/);
+  assert.doesNotMatch(result.stdout, /package tests passed/);
+});
+
+test("test:full raw exits non-zero when the package test process receives SIGKILL", () => {
+  const result = runLoggedFixture("process.kill(process.pid, 'SIGKILL')");
+
+  assert.equal(result.status, 1);
+  assert.doesNotMatch(result.stdout, /package tests passed/);
+});
+
+test("test:full raw keeps ERR_IPC_CHANNEL_CLOSED worker failures visible", () => {
+  const result = runLoggedFixture("console.error('ERR_IPC_CHANNEL_CLOSED from vitest worker'); process.exit(1)");
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /ERR_IPC_CHANNEL_CLOSED from vitest worker/);
+  assert.doesNotMatch(result.stdout, /package tests passed/);
+});
+
+test("test:full raw exits non-zero for ordinary package failures", () => {
+  const result = runLoggedFixture("console.error('package assertion failed'); process.exit(2)");
+
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /package assertion failed/);
+  assert.doesNotMatch(result.stdout, /package tests passed/);
+});
+
+test("test:full raw exits non-zero when the test binary is missing", () => {
+  const logPath = path.join(mkdtempSync(path.join(tmpdir(), "fusion-test-full-")), "package.log");
+  const moduleUrl = pathToFileURL(path.resolve("scripts/test-full-raw.mjs")).href;
+  const script = `
+    import { runLogged } from ${JSON.stringify(moduleUrl)};
+    runLogged("definitely-missing-fusion-test-binary", [], {
       env: { ...process.env, FUSION_TEST_FULL_LOG: ${JSON.stringify(logPath)} },
     });
   `;
@@ -97,8 +143,7 @@ test("test:full raw does not turn SIGKILL-style package failures into success", 
     encoding: "utf-8",
   });
 
-  assert.equal(result.status, 137);
-  assert.match(result.stderr, /worker died with SIGKILL \/ exit code 137/);
+  assert.equal(result.status, 1);
   assert.doesNotMatch(result.stdout, /package tests passed/);
 });
 

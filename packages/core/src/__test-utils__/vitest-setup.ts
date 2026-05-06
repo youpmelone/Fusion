@@ -468,6 +468,30 @@ function cleanupTrackedSubprocess(proc: ChildProcess): void {
   trackedSubprocesses.delete(proc);
 }
 
+type ListenerCapableProcess = ChildProcess & {
+  once?: (event: string, listener: (...args: unknown[]) => void) => unknown;
+  removeListener?: (event: string, listener: (...args: unknown[]) => void) => unknown;
+};
+
+function assertListenerCapableProcess(proc: ChildProcess, commandLine: string): proc is ListenerCapableProcess {
+  const candidate = proc as ListenerCapableProcess;
+  if (typeof candidate.once === "function") {
+    return true;
+  }
+
+  completedSubprocessFailures.push(
+    `Subprocess tracker expected an EventEmitter-compatible ChildProcess for ${commandLine}, but the returned object has no once() method. ` +
+    "Fix the child_process mock to return a real EventEmitter or a ChildProcess-shaped test double.",
+  );
+  return false;
+}
+
+function removeProcessListener(proc: ChildProcess, event: string, listener: (...args: unknown[]) => void): void {
+  const removeListener = (proc as ListenerCapableProcess).removeListener;
+  if (typeof removeListener !== "function") return;
+  removeListener.call(proc, event, listener);
+}
+
 function registerTrackedSubprocess(proc: ChildProcess, commandLine: string): void {
   const tracked: TrackedSubprocess = {
     commandLine,
@@ -489,6 +513,10 @@ function registerTrackedSubprocess(proc: ChildProcess, commandLine: string): voi
       // Ignore — the process may have already exited.
     }
   }, DEFAULT_TEST_SUBPROCESS_TIMEOUT_MS);
+
+  if (!assertListenerCapableProcess(proc, commandLine)) {
+    return;
+  }
 
   const finish = () => cleanupTrackedSubprocess(proc);
   proc.once("close", finish);
@@ -645,10 +673,14 @@ afterEach(async () => {
             continue;
           }
           const finish = () => {
-            proc.removeListener("exit", finish);
-            proc.removeListener("close", finish);
+            removeProcessListener(proc, "exit", finish);
+            removeProcessListener(proc, "close", finish);
             done();
           };
+          if (!assertListenerCapableProcess(proc, trackedSubprocesses.get(proc)?.commandLine ?? "unknown subprocess")) {
+            done();
+            continue;
+          }
           proc.once("exit", finish);
           proc.once("close", finish);
         }
