@@ -8437,6 +8437,31 @@ export interface CounterLawsuitAuthorityValidationRetryInput {
   maxResultsPerCandidate?: number;
 }
 
+export interface CounterLawsuitResearchMemoDiagnostic {
+  code: string;
+  severity: "info" | "warning" | "error";
+  message: string;
+  sourceDocumentKey?: string;
+  sourceTaskId?: string;
+}
+
+export interface CounterLawsuitResearchMemoSummary {
+  runId: string;
+  status: "completed" | "partial" | "blocked" | "failed" | "not-run";
+  memoDocumentKey?: "research-memo" | string;
+  statusDocumentKey?: "research-memo-status" | string;
+  evidenceCount: number;
+  authorityCount: number;
+  conclusionCount: number;
+  sourcePathCount: number;
+  diagnostics: CounterLawsuitResearchMemoDiagnostic[];
+  safetyNotice: string;
+}
+
+export interface CounterLawsuitResearchMemoRetryInput {
+  force?: boolean;
+}
+
 export interface StartCounterLawsuitPrototypeWorkflowResponse {
   runId: string;
   status: CounterLawsuitWorkflowRunStatus;
@@ -8455,6 +8480,7 @@ export interface StartCounterLawsuitPrototypeWorkflowResponse {
   codexSkillSource?: "default" | "user";
   vaultMining?: CounterLawsuitVaultMiningSummary;
   authorityValidation?: CounterLawsuitAuthorityValidationSummary;
+  researchMemo?: CounterLawsuitResearchMemoSummary;
 }
 
 export interface CounterLawsuitWorkflowRunStatusResponse {
@@ -8468,6 +8494,7 @@ export interface CounterLawsuitWorkflowRunStatusResponse {
   lineageDocuments: Array<{ taskId: string; documentKey: string; stage: string }>;
   vaultMining?: CounterLawsuitVaultMiningSummary;
   authorityValidation?: CounterLawsuitAuthorityValidationSummary;
+  researchMemo?: CounterLawsuitResearchMemoSummary;
 }
 
 export function startCounterLawsuitPrototypeWorkflow(
@@ -8513,6 +8540,20 @@ export function runCounterLawsuitPrototypeAuthorityValidation(
 ): Promise<CounterLawsuitAuthorityValidationSummary> {
   return api<CounterLawsuitAuthorityValidationSummary>(
     withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/authority-validation`, projectId),
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function runCounterLawsuitPrototypeResearchMemo(
+  runId: string,
+  input: CounterLawsuitResearchMemoRetryInput = {},
+  projectId?: string,
+): Promise<CounterLawsuitResearchMemoSummary> {
+  return api<CounterLawsuitResearchMemoSummary>(
+    withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/research-memo`, projectId),
     {
       method: "POST",
       body: JSON.stringify(input),

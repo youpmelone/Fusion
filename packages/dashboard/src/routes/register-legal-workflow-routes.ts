@@ -7,6 +7,14 @@ import {
   type CounterLawsuitWorkflowLaunchInput,
 } from "../legal-workflow-orchestrator.js";
 import {
+  RESEARCH_MEMO_DOCUMENT_KEY,
+  RESEARCH_MEMO_SAFETY_NOTICE,
+  deriveResearchMemoStatusForRun,
+  generateCounterLawsuitResearchMemo,
+  type CounterLawsuitResearchMemoResult,
+  type ResearchMemoDiagnostic,
+} from "../legal-research-memo.js";
+import {
   COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY,
   COURTLISTENER_SAFETY_NOTICE,
   deriveAuthorityValidationStatusForRun,
@@ -60,6 +68,19 @@ export interface LegalWorkflowAuthorityValidationSummary {
   diagnostics: CourtListenerProviderDiagnostic[];
   authorityValidationDocumentKey?: string;
   statusDocumentKey?: string;
+  safetyNotice: string;
+}
+
+export interface LegalWorkflowResearchMemoSummary {
+  runId: string;
+  status: CounterLawsuitResearchMemoResult["status"];
+  memoDocumentKey?: string;
+  statusDocumentKey?: string;
+  evidenceCount: number;
+  authorityCount: number;
+  conclusionCount: number;
+  sourcePathCount: number;
+  diagnostics: ResearchMemoDiagnostic[];
   safetyNotice: string;
 }
 
@@ -212,6 +233,71 @@ async function runAuthorityValidationForResponse(params: {
   }
 }
 
+function researchMemoFailureSummary(runId: string): LegalWorkflowResearchMemoSummary {
+  return {
+    runId,
+    status: "failed",
+    memoDocumentKey: RESEARCH_MEMO_DOCUMENT_KEY,
+    evidenceCount: 0,
+    authorityCount: 0,
+    conclusionCount: 0,
+    sourcePathCount: 0,
+    diagnostics: [{
+      code: "research-memo-route-failed",
+      severity: "error",
+      message: "Research memo generation failed before a memo summary could be returned. The workflow run remains queued; retry the research-memo endpoint after checking prerequisite documents.",
+      sourceDocumentKey: RESEARCH_MEMO_DOCUMENT_KEY,
+    }],
+    safetyNotice: RESEARCH_MEMO_SAFETY_NOTICE,
+  };
+}
+
+async function runResearchMemoForResponse(params: {
+  store: TaskStore;
+  runId: string;
+  force?: boolean;
+}): Promise<LegalWorkflowResearchMemoSummary> {
+  try {
+    const result = await generateCounterLawsuitResearchMemo({
+      taskStore: params.store,
+      runId: params.runId,
+      force: params.force,
+    });
+    return {
+      runId: result.runId,
+      status: result.status,
+      memoDocumentKey: result.memoDocumentKey,
+      statusDocumentKey: result.statusDocumentKey,
+      evidenceCount: result.evidenceCount,
+      authorityCount: result.authorityCount,
+      conclusionCount: result.conclusionCount,
+      sourcePathCount: result.sourcePathCount,
+      diagnostics: result.diagnostics,
+      safetyNotice: result.safetyNotice,
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.statusCode === 404) throw error;
+    return researchMemoFailureSummary(params.runId);
+  }
+}
+
+function validateResearchMemoRetryPayload(body: unknown): { force?: boolean } {
+  if (body === undefined || body === null || (typeof body === "object" && !Array.isArray(body) && Object.keys(body as Record<string, unknown>).length === 0)) {
+    return {};
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw badRequest("research memo request body must be an object");
+  }
+  const record = body as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (key !== "force") throw badRequest(`invalid research memo field: ${key}`);
+  }
+  if (record.force !== undefined && typeof record.force !== "boolean") {
+    throw badRequest("force must be a boolean");
+  }
+  return { force: record.force as boolean | undefined };
+}
+
 export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWorkflowRouteDeps = {}): void {
   const { router, getProjectContext, rethrowAsApiError } = ctx;
   const createAgentStore = deps.createAgentStore ?? defaultCreateAgentStore;
@@ -236,7 +322,11 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         launchInput: req.body as CounterLawsuitWorkflowLaunchInput,
         deps,
       });
-      res.status(201).json({ ...response, vaultMining, authorityValidation });
+      const researchMemo = await runResearchMemoForResponse({
+        store: scopedStore,
+        runId: response.runId,
+      });
+      res.status(201).json({ ...response, vaultMining, authorityValidation, researchMemo });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;
@@ -293,6 +383,29 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
     }
   });
 
+  router.post("/legal-workflows/counter-lawsuit/runs/:runId/research-memo", async (req, res) => {
+    try {
+      if (!req.params.runId?.trim()) throw badRequest("runId is required");
+      const { store: scopedStore } = await getProjectContext(req);
+      const request = validateResearchMemoRetryPayload(req.body);
+      await getCounterLawsuitWorkflowRunStatus({
+        taskStore: scopedStore,
+        runId: req.params.runId,
+      });
+      const researchMemo = await runResearchMemoForResponse({
+        store: scopedStore,
+        runId: req.params.runId,
+        force: request.force,
+      });
+      res.json(researchMemo);
+    } catch (error: unknown) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      rethrowAsApiError(error);
+    }
+  });
+
   router.get("/legal-workflows/counter-lawsuit/runs/:runId", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
@@ -308,7 +421,11 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         taskStore: scopedStore,
         runId: req.params.runId,
       });
-      res.json({ ...status, vaultMining, authorityValidation });
+      const researchMemo = await deriveResearchMemoStatusForRun({
+        taskStore: scopedStore,
+        runId: req.params.runId,
+      });
+      res.json({ ...status, vaultMining, authorityValidation, researchMemo });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;
