@@ -218,8 +218,9 @@ describe("startCounterLawsuitWorkflowRun", () => {
     expect(workflowStepIds).toEqual(["WS-001", "WS-002", "WS-003"]);
     expect(taskStore.workflowSteps.every((step) => step.mode === "prompt" && step.prompt.includes("REQUEST REVISION"))).toBe(true);
     expect(taskStore.workflowSteps[0].prompt).toContain("REQUEST REVISION if any factual claim");
-    expect(taskStore.workflowSteps[0].prompt).toContain("if any legal authority remains unverified");
-    expect(taskStore.workflowSteps[0].prompt).toContain("Unverified labels are useful for discovery notes, but they do not satisfy this completion gate");
+    expect(taskStore.workflowSteps[0].prompt).toContain("courtlistener-authority-validation");
+    expect(taskStore.workflowSteps[0].prompt).toContain("missing, unmatched, ambiguous, or unavailable CourtListener results");
+    expect(taskStore.workflowSteps[0].prompt).toContain("Explicitly labeled unverified authority notes may remain only as unresolved research gaps");
     expect(taskStore.tasks.every((task) => JSON.stringify(task.enabledWorkflowSteps) === JSON.stringify(workflowStepIds))).toBe(true);
 
     expect(agentStore.createCalls).toBe(6);
@@ -410,8 +411,11 @@ describe("generated legal workflow prompts", () => {
       const expectedDocumentKey = COUNTER_LAWSUIT_STAGE_DEFINITIONS[index].documentKey;
       expect(task.description).toContain("Use the existing installed Codex legal skills assigned to this durable agent");
       expect(task.description).toContain("Mine facts through QMD MCP and Obsidian MCP when those integrations are available");
-      expect(task.description).toContain("Use CourtListener validation where legal authority validation is available");
+      expect(task.description).toContain("Read task document key `courtlistener-authority-validation` when it exists");
+      expect(task.description).toContain("Treat missing, unmatched, ambiguous, or unavailable CourtListener results as unresolved authority gaps");
+      expect(task.description).toContain("does not verify legal conclusions, good-law status, filing readiness, or attorney judgment");
       expect(task.description).toContain("explicitly mark the affected facts, evidence, authorities, or receipts as unverified");
+      expect(task.description).toContain("Do not invent citations, quotes, docket entries, CourtListener matches, or source receipts");
       expect(task.description).toContain(`Write the primary output to task document key \`${expectedDocumentKey}\``);
       expect(task.description).toContain("All generated materials are drafts only");
       expect(task.description).toContain("not legal advice");
@@ -434,6 +438,9 @@ describe("generated legal workflow prompts", () => {
     expect(allDocumentContent).toContain("All generated outputs are drafts only");
     expect(stageDocumentContent).toContain("Read task document key `vault-mining-receipts` as the required first source manifest");
     expect(stageDocumentContent).toContain("does not legally verify facts or validate citations");
+    expect(stageDocumentContent).toContain("Read task document key `courtlistener-authority-validation` when present");
+    expect(stageDocumentContent).toContain("Missing, unmatched, ambiguous, or unavailable CourtListener validation remains an unresolved authority gap");
+    expect(stageDocumentContent).toContain("does not verify legal conclusions, good-law status, filing readiness, or attorney judgment");
     for (const key of ["research-memo", "evidence-ledger", "claim-map", "draft-counter-lawsuit-complaint", "red-team-report", "lineage-scoring-log"]) {
       expect(stageDocumentContent).toContain(`Output document key: ${key}`);
     }
