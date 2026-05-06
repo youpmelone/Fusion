@@ -220,3 +220,89 @@ describe("red-team report input collection", () => {
     expect(RED_TEAM_REPORT_SAFETY_NOTICE).toContain("not filing-ready");
   });
 });
+
+describe("red-team report adversarial row generation", () => {
+  it("generates MTD draft-risk rows from missing elements and pleading placeholders", async () => {
+    const store = new FakeTaskStore();
+    seedComplaint(store, {
+      manifest: complaintManifest({
+        sections: [
+          { sectionId: "SEC-001", title: "Jurisdiction and venue placeholders", text: "Jurisdiction placeholder; venue placeholder." },
+          { sectionId: "SEC-002", title: "Requested relief placeholder", text: "Damages and relief placeholder." },
+        ],
+        claimDrafts: [{ claimDraftId: "CD-001", elementIds: [], supportIds: [], sourcePaths: ["Vault/A.md"], receiptIds: ["R-001"] }],
+        missingProof: [
+          { missingProofId: "MP-001", claimDraftId: "CD-001", reason: "Missing element support for claim draft." },
+          { missingProofId: "MP-002", reason: "Jurisdiction and venue placeholder remains unresolved." },
+          { missingProofId: "MP-003", reason: "Damages and requested relief support missing." },
+        ],
+      }),
+    });
+    const result = await collectCounterLawsuitRedTeamInputs({ taskStore: store as never, runId: "CLW-1" });
+    expect(result.mtdAttacks.map((attack) => attack.category)).toEqual(expect.arrayContaining([
+      "failure-to-state-a-claim",
+      "missing-element-support",
+      "jurisdiction-or-venue-gap",
+      "damages-or-relief-gap",
+    ]));
+    expect(result.mtdAttacks.every((attack) => attack.draftRiskOnly)).toBe(true);
+    expect(result.mtdAttacks.find((attack) => attack.category === "missing-element-support")?.missingProofIds).toContain("MP-001");
+    expect(result.mtdAttacks.find((attack) => attack.category === "jurisdiction-or-venue-gap")?.severity).toBe("blocker");
+  });
+
+  it("preserves source, receipt, authority, and citation IDs on citation issue rows", async () => {
+    const store = new FakeTaskStore();
+    seedComplaint(store, {
+      manifest: complaintManifest({
+        paragraphs: [{ paragraphId: "P-001", claimDraftId: "CD-001", sourcePaths: ["Vault/A.md"], receiptIds: ["R-001"], citationStatusIds: ["CIT-001"], authorityRecordIds: ["AUTH-001"] }],
+        claimDrafts: [{ claimDraftId: "CD-001", elementIds: ["EL-001"], supportIds: ["SUP-001"], sourcePaths: ["Vault/A.md"], receiptIds: ["R-001"], citationStatusIds: ["CIT-001"], authorityRecordIds: ["AUTH-001"] }],
+        sourceReferences: [
+          { sourceReferenceId: "SRC-001", sourcePath: "Vault/A.md", receiptId: "R-001", authorityRecordId: "AUTH-001", citationStatusId: "CIT-001", authorityStatus: "ambiguous" },
+          { sourceReferenceId: "SRC-002", receiptId: "R-002" },
+        ],
+        missingProof: [],
+        counts: undefined,
+      }),
+    });
+    const result = await collectCounterLawsuitRedTeamInputs({ taskStore: store as never, runId: "CLW-1" });
+    expect(result.citationIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sourceReferenceIds: ["SRC-001"], sourcePaths: ["Vault/A.md"], receiptIds: ["R-001"], authorityRecordIds: ["AUTH-001"], citationStatusIds: ["CIT-001"] }),
+      expect.objectContaining({ sourceReferenceIds: ["SRC-002"], receiptIds: ["R-002"] }),
+    ]));
+  });
+
+  it("creates revision recommendations that reference generated finding IDs", async () => {
+    const store = new FakeTaskStore();
+    seedComplaint(store, { manifest: complaintManifest() });
+    const result = await collectCounterLawsuitRedTeamInputs({ taskStore: store as never, runId: "CLW-1" });
+    const findingIds = new Set(result.findings.map((finding) => finding.findingId));
+    expect(result.revisionRecommendations.length).toBe(result.findings.length);
+    expect(result.revisionRecommendations.every((recommendation) => recommendation.findingIds.every((findingId) => findingIds.has(findingId)))).toBe(true);
+    expect(result.revisionRecommendations.map((recommendation) => recommendation.summary).join(" ")).toContain("source-linked");
+  });
+
+  it("keeps findings deterministic across repeated collection", async () => {
+    const store = new FakeTaskStore();
+    seedComplaint(store, { manifest: complaintManifest({ counts: undefined }) });
+    const first = await collectCounterLawsuitRedTeamInputs({ taskStore: store as never, runId: "CLW-1", now: () => new Date("2026-05-06T02:00:00.000Z") });
+    const second = await collectCounterLawsuitRedTeamInputs({ taskStore: store as never, runId: "CLW-1", now: () => new Date("2026-05-06T02:00:00.000Z") });
+    expect(first.findings).toEqual(second.findings);
+    expect(first.mtdAttacks).toEqual(second.mtdAttacks);
+    expect(first.citationIssues).toEqual(second.citationIssues);
+  });
+
+  it("counts severe inherited blockers and redacts token-like strings in generated findings", async () => {
+    const store = new FakeTaskStore();
+    seedComplaint(store, {
+      manifest: complaintManifest({ missingProof: [{ missingProofId: "MP-SECRET", reason: "Jurisdiction blocked by --auth-token top-secret-token-value" }] }),
+      status: "blocked",
+    });
+    const result = await collectCounterLawsuitRedTeamInputs({ taskStore: store as never, runId: "CLW-1" });
+    const serialized = JSON.stringify(result);
+    expect(result.status).toBe("blocked");
+    expect(result.counts.unresolvedBlockers).toBeGreaterThan(0);
+    expect(result.findings.some((finding) => finding.severity === "blocker")).toBe(true);
+    expect(serialized).toContain("[REDACTED]");
+    expect(serialized).not.toContain("top-secret-token-value");
+  });
+});

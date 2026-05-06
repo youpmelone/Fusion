@@ -42,9 +42,12 @@ export interface RedTeamFinding {
   paragraphIds: string[];
   claimDraftIds: string[];
   missingProofIds: string[];
+  sourceReferenceIds: string[];
   sourcePaths: string[];
+  receiptIds: string[];
   authorityRecordIds: string[];
   citationStatusIds: string[];
+  sourceTaskIds: string[];
   unresolved: true;
 }
 
@@ -56,9 +59,12 @@ export interface RedTeamMotionToDismissAttack {
   paragraphIds: string[];
   claimDraftIds: string[];
   missingProofIds: string[];
+  sourceReferenceIds: string[];
+  sourcePaths: string[];
+  receiptIds: string[];
   authorityRecordIds: string[];
   citationStatusIds: string[];
-  sourcePaths: string[];
+  sourceTaskIds: string[];
   draftRiskOnly: true;
 }
 
@@ -83,6 +89,12 @@ export interface RedTeamRevisionRecommendation {
   paragraphIds: string[];
   claimDraftIds: string[];
   missingProofIds: string[];
+  sourceReferenceIds: string[];
+  sourcePaths: string[];
+  receiptIds: string[];
+  authorityRecordIds: string[];
+  citationStatusIds: string[];
+  sourceTaskIds: string[];
   unresolved: true;
 }
 
@@ -351,6 +363,204 @@ function countsFromComplaintManifest(manifest: Record<string, unknown> | undefin
   };
 }
 
+
+interface RedTeamRefs {
+  paragraphIds: string[];
+  claimDraftIds: string[];
+  missingProofIds: string[];
+  sourceReferenceIds: string[];
+  sourcePaths: string[];
+  receiptIds: string[];
+  authorityRecordIds: string[];
+  citationStatusIds: string[];
+  sourceTaskIds: string[];
+}
+
+interface RedTeamRows {
+  findings: RedTeamFinding[];
+  mtdAttacks: RedTeamMotionToDismissAttack[];
+  citationIssues: RedTeamCitationIssue[];
+  revisionRecommendations: RedTeamRevisionRecommendation[];
+}
+
+function compactText(record: Record<string, unknown>, keys: string[], maxChars = 500): string | undefined {
+  for (const key of keys) {
+    const value = boundedText(record[key], maxChars);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function refArray(record: Record<string, unknown>, arrayKey: string, singleKey: string, maxChars = 180): string[] {
+  return uniqueSorted([...stringArray(record[arrayKey], maxChars), boundedText(record[singleKey], maxChars)]);
+}
+
+function refs(record: Record<string, unknown>, extra: Partial<RedTeamRefs> = {}): RedTeamRefs {
+  return {
+    paragraphIds: uniqueSorted([...refArray(record, "paragraphIds", "paragraphId"), ...(extra.paragraphIds ?? [])]),
+    claimDraftIds: uniqueSorted([...refArray(record, "claimDraftIds", "claimDraftId"), boundedText(record.claimId), ...(extra.claimDraftIds ?? [])]),
+    missingProofIds: uniqueSorted([...refArray(record, "missingProofIds", "missingProofId"), ...(extra.missingProofIds ?? [])]),
+    sourceReferenceIds: uniqueSorted([...refArray(record, "sourceReferenceIds", "sourceReferenceId"), ...(extra.sourceReferenceIds ?? [])]),
+    sourcePaths: uniqueSorted([...refArray(record, "sourcePaths", "sourcePath", 500), ...(extra.sourcePaths ?? [])]),
+    receiptIds: uniqueSorted([...refArray(record, "receiptIds", "receiptId"), ...(extra.receiptIds ?? [])]),
+    authorityRecordIds: uniqueSorted([...refArray(record, "authorityRecordIds", "authorityRecordId"), boundedText(record.authorityId), ...(extra.authorityRecordIds ?? [])]),
+    citationStatusIds: uniqueSorted([...refArray(record, "citationStatusIds", "citationStatusId"), ...(extra.citationStatusIds ?? [])]),
+    sourceTaskIds: uniqueSorted([...refArray(record, "sourceTaskIds", "sourceTaskId"), boundedText(record.taskId), ...(extra.sourceTaskIds ?? [])]),
+  };
+}
+
+function mergeRefSets(...sets: Array<Partial<RedTeamRefs> | undefined>): RedTeamRefs {
+  return {
+    paragraphIds: uniqueSorted(sets.flatMap((set) => set?.paragraphIds ?? [])),
+    claimDraftIds: uniqueSorted(sets.flatMap((set) => set?.claimDraftIds ?? [])),
+    missingProofIds: uniqueSorted(sets.flatMap((set) => set?.missingProofIds ?? [])),
+    sourceReferenceIds: uniqueSorted(sets.flatMap((set) => set?.sourceReferenceIds ?? [])),
+    sourcePaths: uniqueSorted(sets.flatMap((set) => set?.sourcePaths ?? [])),
+    receiptIds: uniqueSorted(sets.flatMap((set) => set?.receiptIds ?? [])),
+    authorityRecordIds: uniqueSorted(sets.flatMap((set) => set?.authorityRecordIds ?? [])),
+    citationStatusIds: uniqueSorted(sets.flatMap((set) => set?.citationStatusIds ?? [])),
+    sourceTaskIds: uniqueSorted(sets.flatMap((set) => set?.sourceTaskIds ?? [])),
+  };
+}
+
+function lowerIncludes(value: string | undefined, needles: string[]): boolean {
+  const lower = (value ?? "").toLowerCase();
+  return needles.some((needle) => lower.includes(needle));
+}
+
+function sortedRecords(manifest: Record<string, unknown> | undefined, keys: string[], idKeys: string[]): Array<Record<string, unknown>> {
+  return manifestArray(manifest, keys).sort((left, right) => {
+    const leftId = idKeys.map((key) => boundedText(left[key])).find(Boolean) ?? "";
+    const rightId = idKeys.map((key) => boundedText(right[key])).find(Boolean) ?? "";
+    return leftId.localeCompare(rightId);
+  });
+}
+
+function complaintSourceTaskIds(manifest: Record<string, unknown> | undefined): string[] {
+  return uniqueSorted([
+    boundedText(manifest?.draftComplaintTaskId),
+    ...manifestArray(manifest, ["sourceDocuments"]).map((record) => boundedText(record.taskId)),
+  ]);
+}
+
+function makeRedTeamRows(manifest: Record<string, unknown> | undefined, diagnostics: RedTeamDiagnostic[], complaintStatus?: string): RedTeamRows {
+  if (!manifest) return { findings: [], mtdAttacks: [], citationIssues: [], revisionRecommendations: [] };
+  const sourceTaskIds = complaintSourceTaskIds(manifest);
+  const defaults = { sourceTaskIds };
+  const sections = sortedRecords(manifest, ["sections"], ["sectionId", "id"]);
+  const paragraphs = sortedRecords(manifest, ["paragraphs"], ["paragraphId", "id"]);
+  const claims = sortedRecords(manifest, ["claimDrafts", "claims"], ["claimDraftId", "claimId", "id"]);
+  const missing = sortedRecords(manifest, ["missingProof"], ["missingProofId", "id"]);
+  const sources = sortedRecords(manifest, ["sourceReferences"], ["sourceReferenceId", "id"]);
+  const findings: RedTeamFinding[] = [];
+  const citationIssues: RedTeamCitationIssue[] = [];
+  const addFinding = (category: RedTeamFindingCategory, severity: RedTeamSeverity, summary: string, refInput?: Partial<RedTeamRefs>): RedTeamFinding => {
+    const merged = mergeRefSets(refInput, defaults);
+    const finding = { findingId: `RTF-${String(findings.length + 1).padStart(3, "0")}`, category, severity, summary: boundedText(summary, 500) ?? "Draft-only finding requires review.", ...merged, unresolved: true as const };
+    findings.push(finding);
+    return finding;
+  };
+  const addCitationIssue = (severity: RedTeamSeverity, summary: string, refInput?: Partial<RedTeamRefs>): void => {
+    const merged = mergeRefSets(refInput, defaults);
+    citationIssues.push({ issueId: `RTCI-${String(citationIssues.length + 1).padStart(3, "0")}`, severity, summary: boundedText(summary, 500) ?? "Citation issue requires human review.", paragraphIds: merged.paragraphIds, claimDraftIds: merged.claimDraftIds, sourceReferenceIds: merged.sourceReferenceIds, sourcePaths: merged.sourcePaths, receiptIds: merged.receiptIds, authorityRecordIds: merged.authorityRecordIds, citationStatusIds: merged.citationStatusIds, humanVerificationRequired: true });
+  };
+  const textOf = (record: Record<string, unknown>): string | undefined => compactText(record, ["reason", "summary", "description", "title", "heading", "text", "body", "content"], 500);
+  const proofRefs = (needles: string[]): RedTeamRefs[] => missing.filter((record) => lowerIncludes(textOf(record), needles)).map((record) => refs(record, defaults));
+  const placeholderRefs = (needles: string[]): RedTeamRefs[] => [
+    ...sections.filter((record) => lowerIncludes(textOf(record), ["placeholder", ...needles]) && lowerIncludes(textOf(record), needles)).map((record) => refs(record, defaults)),
+    ...proofRefs(["placeholder", ...needles]),
+  ];
+
+  if (complaintStatus && complaintStatus !== "completed") addFinding("upstream-blocker", complaintStatus === "blocked" || complaintStatus === "failed" ? "blocker" : "high", `${DRAFT_COMPLAINT_STATUS_DOCUMENT_KEY} reports ${complaintStatus}; inherited blockers remain unresolved.`, { sourceTaskIds });
+  for (const diagnostic of diagnostics.filter((item) => item.severity === "error")) addFinding("upstream-blocker", "blocker", diagnostic.message, { paragraphIds: uniqueSorted([diagnostic.paragraphId]), claimDraftIds: uniqueSorted([diagnostic.claimDraftId]), sourceTaskIds: uniqueSorted([diagnostic.sourceTaskId, ...sourceTaskIds]) });
+  for (const record of missing) {
+    const proofRefsForRow = refs(record, defaults);
+    const reason = textOf(record) ?? proofRefsForRow.missingProofIds[0] ?? "upstream missing-proof row";
+    addFinding("missing-proof", lowerIncludes(reason, ["jurisdiction", "venue", "standing", "damages", "relief", "element"]) ? "high" : "warning", `Missing proof remains unresolved: ${reason}.`, proofRefsForRow);
+  }
+  const placeholderTopics: Array<[string, string[], RedTeamSeverity]> = [
+    ["caption, parties, standing, or capacity placeholders remain unresolved", ["caption", "party", "parties", "standing", "capacity"], "high"],
+    ["jurisdiction or venue placeholders remain unresolved", ["jurisdiction", "venue"], "blocker"],
+    ["damages, requested relief, or remedy placeholders remain unresolved", ["damages", "relief", "remedy"], "high"],
+  ];
+  for (const [summary, needles, severity] of placeholderTopics) {
+    const matches = placeholderRefs(needles);
+    if (matches.length > 0) addFinding("placeholder-field", severity, summary, mergeRefSets(...matches));
+  }
+  for (const record of paragraphs) {
+    const rowRefs = refs(record, defaults);
+    const text = textOf(record);
+    const blocked = record.blocked === true || record.unsupported === true || record.unresolvedDraftOnly === true || lowerIncludes(text, ["placeholder", "tbd", "unknown"]);
+    if (blocked || rowRefs.sourcePaths.length === 0 || rowRefs.receiptIds.length === 0) addFinding("pleading-weakness", rowRefs.sourcePaths.length === 0 || rowRefs.receiptIds.length === 0 ? "high" : "warning", `Draft paragraph ${rowRefs.paragraphIds[0] ?? "unknown"} is unsupported, blocked, or draft-only unresolved.`, rowRefs);
+    if (rowRefs.sourcePaths.length === 0 || rowRefs.receiptIds.length === 0) addCitationIssue(rowRefs.sourcePaths.length === 0 ? "high" : "warning", `Draft paragraph ${rowRefs.paragraphIds[0] ?? "unknown"} lacks a source path or receipt ID.`, rowRefs);
+  }
+  for (const record of claims) {
+    const rowRefs = refs(record, defaults);
+    const elementIds = stringArray(record.elementIds);
+    const supportIds = uniqueSorted([...stringArray(record.supportIds), ...stringArray(record.supportingEvidenceIds)]);
+    const blocked = record.blocked === true || record.unsupported === true || record.unresolvedDraftOnly === true || elementIds.length === 0 || supportIds.length === 0;
+    if (blocked || rowRefs.sourcePaths.length === 0 || rowRefs.receiptIds.length === 0) addFinding("pleading-weakness", elementIds.length === 0 || supportIds.length === 0 ? "high" : "warning", `Draft claim ${rowRefs.claimDraftIds[0] ?? "unknown"} has unresolved element, support, source, or receipt gaps.`, rowRefs);
+    if (rowRefs.sourcePaths.length === 0 || rowRefs.receiptIds.length === 0) addCitationIssue(rowRefs.sourcePaths.length === 0 ? "high" : "warning", `Draft claim ${rowRefs.claimDraftIds[0] ?? "unknown"} lacks source-linked support or a receipt ID.`, rowRefs);
+  }
+  for (const record of sources) {
+    const rowRefs = refs(record, defaults);
+    const statusText = compactText(record, ["status", "citationStatus", "authorityStatus", "lookupStatus", "matchStatus", "humanVerificationStatus"], 240);
+    const matchedUrl = boundedText(record.matchedUrl, 500) ?? boundedText(record.courtListenerUrl, 500) ?? boundedText(record.url, 500);
+    if (rowRefs.sourcePaths.length === 0 || rowRefs.receiptIds.length === 0) {
+      addFinding("citation-source-issue", rowRefs.sourcePaths.length === 0 ? "high" : "warning", `Source reference ${rowRefs.sourceReferenceIds[0] ?? "unknown"} is missing a source path or receipt ID.`, rowRefs);
+      addCitationIssue(rowRefs.sourcePaths.length === 0 ? "high" : "warning", `Source reference ${rowRefs.sourceReferenceIds[0] ?? "unknown"} must be repaired with a source path and receipt ID before use.`, rowRefs);
+    }
+    if (rowRefs.authorityRecordIds.length > 0 && (!matchedUrl || lowerIncludes(statusText, ["unmatched", "ambiguous", "unavailable", "not-found", "human", "review"]))) {
+      addFinding("unresolved-authority", "warning", `Authority lookup for source reference ${rowRefs.sourceReferenceIds[0] ?? "unknown"} is unresolved or needs human review.`, rowRefs);
+      addCitationIssue("warning", "Authority record IDs require human review before any citation use.", rowRefs);
+    }
+  }
+  const citationRefs = mergeRefSets(...[...paragraphs, ...claims, ...sources].map((record) => refs(record, defaults)).filter((rowRefs) => rowRefs.citationStatusIds.length > 0));
+  if (citationRefs.citationStatusIds.length > 0) {
+    addFinding("citation-source-issue", "warning", "Citation-status IDs in the draft complaint still require human citation-format and source verification.", citationRefs);
+    addCitationIssue("warning", "Citation-status IDs are lookup/status records only and require human verification before reliance.", citationRefs);
+  }
+  if (proofRefs(["damages", "relief", "remedy", "support"]).length > 0) addFinding("pleading-weakness", "high", "Damages, requested relief, or support gaps remain unresolved in upstream missing-proof rows.", mergeRefSets(...proofRefs(["damages", "relief", "remedy", "support"])));
+  addFinding("draft-only-safety", "info", "The draft complaint and this red-team report remain draft-only, unverified, not legal advice, not citation-format validation, and not filing-ready.", { sourceTaskIds });
+
+  const addAttack = (attacks: RedTeamMotionToDismissAttack[], category: string, severity: RedTeamSeverity, attackRefs: Partial<RedTeamRefs>): void => {
+    if (attacks.some((attack) => attack.category === category)) return;
+    const merged = mergeRefSets(attackRefs, defaults);
+    attacks.push({ attackId: `RTM-${String(attacks.length + 1).padStart(3, "0")}`, category, severity, summary: `Draft risk category only: ${category.replace(/-/g, " ")} requires attorney review and is not a real motion-practice decision.`, ...merged, draftRiskOnly: true });
+  };
+  const attacks: RedTeamMotionToDismissAttack[] = [];
+  const missingElement = mergeRefSets(...proofRefs(["element", "support", "proof", "unsupported"]), ...claims.filter((record) => stringArray(record.elementIds).length === 0 || stringArray(record.supportIds).length + stringArray(record.supportingEvidenceIds).length === 0).map((record) => refs(record, defaults)));
+  const jurisdictionVenueMatches = placeholderRefs(["jurisdiction", "venue"]);
+  const standingMatches = placeholderRefs(["standing", "capacity", "party", "parties", "caption"]);
+  const damagesMatches = placeholderRefs(["damages", "relief", "remedy"]);
+  const jurisdictionVenue = mergeRefSets(...jurisdictionVenueMatches);
+  const standing = mergeRefSets(...standingMatches);
+  const timeliness = mergeRefSets(...proofRefs(["limitations", "timeliness", "deadline", "date", "time"]));
+  const damages = mergeRefSets(...damagesMatches);
+  const preclusion = mergeRefSets(...proofRefs(["preclusion", "immunity"]));
+  const specificity = mergeRefSets(...paragraphs.filter((record) => refs(record, defaults).sourcePaths.length === 0 || lowerIncludes(textOf(record), ["placeholder", "tbd", "unknown", "conclusory"])).map((record) => refs(record, defaults)), ...proofRefs(["specificity", "conclusory", "facts", "factual"]));
+  if (missingElement.missingProofIds.length + missingElement.claimDraftIds.length > 0 || findings.some((finding) => finding.category === "pleading-weakness")) addAttack(attacks, "failure-to-state-a-claim", "high", missingElement);
+  if (missingElement.missingProofIds.length + missingElement.claimDraftIds.length > 0) addAttack(attacks, "missing-element-support", "high", missingElement);
+  if (standingMatches.length > 0) addAttack(attacks, "standing-or-capacity-gap", "high", standing);
+  if (jurisdictionVenueMatches.length > 0) addAttack(attacks, "jurisdiction-or-venue-gap", "blocker", jurisdictionVenue);
+  if (timeliness.missingProofIds.length > 0) addAttack(attacks, "limitations-or-timeliness-gap", "warning", timeliness);
+  if (damagesMatches.length > 0) addAttack(attacks, "damages-or-relief-gap", "high", damages);
+  if (preclusion.missingProofIds.length > 0) addAttack(attacks, "preclusion-or-immunity-gap", "warning", preclusion);
+  if (specificity.paragraphIds.length + specificity.missingProofIds.length > 0) addAttack(attacks, "insufficient-factual-specificity", "high", specificity);
+
+  const revisionRecommendations = findings.map((finding, index) => ({ recommendationId: `RTR-${String(index + 1).padStart(3, "0")}`, findingIds: [finding.findingId], summary: finding.category === "citation-source-issue" || finding.category === "unresolved-authority" ? "Obtain human citation review and add source-linked support, or keep the issue unresolved." : finding.category === "placeholder-field" ? "Confirm jurisdiction, venue, standing, parties, damages, and requested relief facts with source-linked support." : "Narrow, remove, or mark the affected draft-only material unresolved until source-linked support and human review are available.", paragraphIds: finding.paragraphIds, claimDraftIds: finding.claimDraftIds, missingProofIds: finding.missingProofIds, sourceReferenceIds: finding.sourceReferenceIds, sourcePaths: finding.sourcePaths, receiptIds: finding.receiptIds, authorityRecordIds: finding.authorityRecordIds, citationStatusIds: finding.citationStatusIds, sourceTaskIds: finding.sourceTaskIds, unresolved: true as const }));
+  return { findings, mtdAttacks: attacks, citationIssues, revisionRecommendations };
+}
+
+function countsWithRows(base: RedTeamCounts, rows: RedTeamRows): RedTeamCounts {
+  return { ...base, findings: rows.findings.length, mtdAttacks: rows.mtdAttacks.length, citationIssues: rows.citationIssues.length, revisionRecommendations: rows.revisionRecommendations.length, unresolvedBlockers: Math.max(base.unresolvedBlockers, rows.findings.filter((finding) => finding.severity === "blocker").length) };
+}
+
+function statusWithRows(baseStatus: RedTeamStatus, rows: RedTeamRows): RedTeamStatus {
+  if (baseStatus === "not-run" || baseStatus === "blocked" || baseStatus === "failed" || baseStatus === "stale") return baseStatus;
+  return rows.findings.length > 0 || rows.mtdAttacks.length > 0 || rows.citationIssues.length > 0 ? "partial" : "completed";
+}
+
 function sourceDocuments(params: {
   claimMapTask?: Task;
   draftComplaintTask?: Task;
@@ -394,7 +604,7 @@ export async function collectCounterLawsuitRedTeamInputs(options: CollectCounter
     normalizeManifestDiagnostics(complaintStatus.manifest),
     statusDiagnostic(complaintStatusValue, draftComplaintTask?.id),
   );
-  const status = deriveStatus({
+  const baseStatus = deriveStatus({
     redTeamStagePresent: Boolean(redTeamTask),
     complaintTaskPresent: Boolean(draftComplaintTask),
     complaintPresent: Boolean(complaint.document),
@@ -402,7 +612,9 @@ export async function collectCounterLawsuitRedTeamInputs(options: CollectCounter
     complaintStatus: complaintStatusValue,
     diagnostics,
   });
-  const counts = countsFromComplaintManifest(complaint.manifest);
+  const rows = makeRedTeamRows(complaint.manifest, diagnostics, complaintStatusValue);
+  const status = statusWithRows(baseStatus, rows);
+  const counts = countsWithRows(countsFromComplaintManifest(complaint.manifest), rows);
   const effectiveStatusDocumentKey = status === "completed" || status === "not-run" ? undefined : RED_TEAM_REPORT_STATUS_DOCUMENT_KEY;
   return {
     runId: options.runId,
@@ -415,10 +627,10 @@ export async function collectCounterLawsuitRedTeamInputs(options: CollectCounter
     redTeamReportDocumentKey: RED_TEAM_REPORT_DOCUMENT_KEY,
     statusDocumentKey: effectiveStatusDocumentKey,
     sourceDocuments: sourceDocuments({ claimMapTask, draftComplaintTask, complaint, complaintStatus }),
-    findings: [],
-    mtdAttacks: [],
-    citationIssues: [],
-    revisionRecommendations: [],
+    findings: rows.findings,
+    mtdAttacks: rows.mtdAttacks,
+    citationIssues: rows.citationIssues,
+    revisionRecommendations: rows.revisionRecommendations,
     diagnostics,
     counts,
     safetyNotice: RED_TEAM_REPORT_SAFETY_NOTICE,
