@@ -167,6 +167,44 @@ describe("SelfHealingManager", () => {
       expect(removeCalls[0][0]).toContain("safe-idle");
       expect(removeCalls[0][0]).not.toContain("dusky-trout");
     });
+
+    it("skips the active worktree during interrupted merge cleanup", async () => {
+      mockedExistsSync.mockReturnValue(true);
+      mockedIsActiveWorktreeCleanupTarget.mockReturnValue(true);
+
+      await (manager as any).cleanupInterruptedMergeArtifacts({
+        id: "FN-029",
+        worktree: "/tmp/test-project/.worktrees/dusky-trout",
+        branch: "fusion/fn-029",
+      } as Task);
+
+      const worktreeRemoveCalls = mockedExecSync.mock.calls.filter(
+        ([cmd]) => typeof cmd === "string" && cmd.includes("git worktree remove"),
+      );
+      expect(worktreeRemoveCalls.map(([cmd]) => cmd)).not.toContain(
+        "git worktree remove '/tmp/test-project/.worktrees/dusky-trout' --force",
+      );
+      expect(mockedExecSync).toHaveBeenCalledWith(
+        "git branch -D 'fusion/fn-029'",
+        expect.objectContaining({ cwd: "/tmp/test-project" }),
+      );
+    });
+
+    it("still removes non-active interrupted merge worktrees", async () => {
+      mockedExistsSync.mockReturnValue(true);
+      mockedIsActiveWorktreeCleanupTarget.mockReturnValue(false);
+
+      await (manager as any).cleanupInterruptedMergeArtifacts({
+        id: "FN-030",
+        worktree: "/tmp/test-project/.worktrees/safe-idle",
+        branch: "fusion/fn-030",
+      } as Task);
+
+      expect(mockedExecSync).toHaveBeenCalledWith(
+        "git worktree remove '/tmp/test-project/.worktrees/safe-idle' --force",
+        expect.objectContaining({ cwd: "/tmp/test-project" }),
+      );
+    });
   });
 
   describe("auto-unpause", () => {

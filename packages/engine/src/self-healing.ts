@@ -578,16 +578,20 @@ export class SelfHealingManager {
 
   private async cleanupInterruptedMergeArtifacts(task: Task): Promise<void> {
     if (task.worktree && existsSync(task.worktree)) {
-      try {
-        await execAsync(`git worktree remove ${shellQuote(task.worktree)} --force`, {
-          cwd: this.options.rootDir,
-          timeout: 120_000,
-        });
-      } catch (err: unknown) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        log.warn(
-          `Failed to remove interrupted-merge worktree ${task.worktree} for ${task.id}: ${errorMessage} — non-fatal, cleanup can retry later`,
-        );
+      if (isActiveWorktreeCleanupTarget(this.options.rootDir, task.worktree)) {
+        log.warn(`Skipping active worktree during interrupted-merge cleanup for ${task.id}: ${task.worktree}`);
+      } else {
+        try {
+          await execAsync(`git worktree remove ${shellQuote(task.worktree)} --force`, {
+            cwd: this.options.rootDir,
+            timeout: 120_000,
+          });
+        } catch (err: unknown) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          log.warn(
+            `Failed to remove interrupted-merge worktree ${task.worktree} for ${task.id}: ${errorMessage} — non-fatal, cleanup can retry later`,
+          );
+        }
       }
     }
 
