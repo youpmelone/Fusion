@@ -103,14 +103,18 @@ describe("CourtListener authority normalization", () => {
     expect(record.rawResultSummary).not.toContain("super-secret-token");
   });
 
-  it("redacts standalone token-like CLI flags in raw summaries", () => {
+  it("redacts standalone flags and authorization key/value forms in raw summaries", () => {
     const record = normalizeCourtListenerAuthorityRecord({
       input: "1 U.S. 1",
       inputType: "citation",
       status: "unavailable",
-      rawResult: { error: "courtlistener --auth-token super-secret-value failed" },
+      rawResult: {
+        error: "courtlistener --auth-token super-secret-value failed authorization=plain-secret-value Authorization: Token header-secret-value",
+      },
     });
     expect(record.rawResultSummary).not.toContain("super-secret-value");
+    expect(record.rawResultSummary).not.toContain("plain-secret-value");
+    expect(record.rawResultSummary).not.toContain("header-secret-value");
   });
 
   it("handles CourtListener citation-keyed lookup response objects", async () => {
@@ -210,6 +214,18 @@ describe("CourtListener authority validation service", () => {
     expect(unavailable.status).toBe("unavailable");
     expect(unavailable.validationRecords[0].status).toBe("unavailable");
     expect(JSON.stringify(unavailable)).not.toContain("super-secret-token");
+  });
+
+  it("redacts and bounds provider diagnostics for unavailable CourtListener", async () => {
+    const longSecret = `provider failed authorization=plain-secret-value ${"x".repeat(2_000)}`;
+    const client: CourtListenerClient = {
+      async lookupCitation() { throw new Error(longSecret); },
+      async searchAuthorities() { throw new Error(longSecret); },
+    };
+    const result = await validateAuthorityCandidatesWithCourtListener({ client, request: { citations: ["1 U.S. 1"] } });
+    expect(result.diagnostics[0].message.length).toBeLessThanOrEqual(700);
+    expect(result.diagnostics[0].message).not.toContain("plain-secret-value");
+    expect(JSON.stringify(result)).not.toContain("plain-secret-value");
   });
 
   it("returns explicit no-candidate status", async () => {

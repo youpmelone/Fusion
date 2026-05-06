@@ -118,7 +118,7 @@ const HARD_MAX_RESULTS_PER_CANDIDATE = 10;
 const MAX_INPUT_CHARS = 300;
 const MAX_TEXT_SCAN_CHARS = 8_000;
 const MAX_SUMMARY_CHARS = 700;
-const TOKEN_RE = /["']?(?:authorization)["']?\s*[:=]\s*["']?bearer\s+[^"'\s,}]{8,}["']?|["']?(?:token|secret|api[_-]?key|password|credential|auth)["']?\s*[:=]\s*["']?[^"'\s,}]{8,}["']?|bearer\s+\S{8,}|Token\s+\S{8,}|(?:sk|pk|ghp|github_pat)[A-Za-z0-9_:\-.=+/]{8,}/gi;
+const TOKEN_RE = /["']?(?:authorization)["']?\s*[:=]\s*["']?(?:bearer|token)\s+[^"'\s,}]{8,}["']?|["']?(?:authorization|token|secret|api[_-]?key|password|credential|auth)["']?\s*[:=]\s*["']?[^"'\s,}]{8,}["']?|bearer\s+\S{8,}|Token\s+\S{8,}|(?:sk|pk|ghp|github_pat)[A-Za-z0-9_:\-.=+/]{8,}/gi;
 const SECRET_FLAG_VALUE_RE = /(--[A-Za-z0-9_.-]*(?:token|secret|key|password|credential|auth)[A-Za-z0-9_.-]*)(\s+)(?:"[^"]+"|'[^']+'|\S+)/gi;
 const TOKEN_KEY_RE = /(?:token|secret|api[_-]?key|password|credential|auth|authorization)/i;
 const CITATION_RE = /\b\d{1,4}\s+(?:U\.S\.|S\.Ct\.|S\.\s?Ct\.|F\.?\s?\d?d|F\.\s?4th|F\.\s?Supp\.?\s?\d?d|Cal\.?\s?\d?d|N\.Y\.?\s?\d?d|P\.?\s?\d?d|A\.?\s?\d?d|So\.?\s?\d?d)\s+\d{1,5}\b/g;
@@ -135,6 +135,10 @@ function boundedText(value: unknown, maxChars = MAX_INPUT_CHARS): string | undef
   const compact = redactSecrets(value).replace(/\s+/g, " ").trim();
   if (!compact) return undefined;
   return compact.length > maxChars ? `${compact.slice(0, maxChars - 1)}…` : compact;
+}
+
+function safeDiagnosticMessage(value: unknown): string {
+  return boundedText(typeof value === "string" ? value : String(value), MAX_SUMMARY_CHARS) ?? "CourtListener provider error";
 }
 
 function boundedInteger(value: unknown, name: string, defaultValue: number, hardMax: number): number {
@@ -191,7 +195,7 @@ export function createCourtListenerClient(options: CreateCourtListenerClientOpti
       if (error instanceof Error && error.name === "AbortError") {
         throw new Error(`CourtListener ${endpointName} timed out`);
       }
-      throw new Error(redactSecrets(error instanceof Error ? error.message : String(error)));
+      throw new Error(safeDiagnosticMessage(error instanceof Error ? error.message : String(error)));
     } finally {
       clearTimeout(timeout);
     }
@@ -524,13 +528,13 @@ export async function validateAuthorityCandidatesWithCourtListener(params: {
         input: candidate.input,
         inputType: candidate.inputType,
         status: "unavailable",
-        rawResult: { error: redactSecrets(error instanceof Error ? error.message : String(error)) },
+        rawResult: { error: safeDiagnosticMessage(error instanceof Error ? error.message : String(error)) },
         retrievedAt: now().toISOString(),
       }));
       diagnostics.push({
         providerName: "courtlistener",
         status: "error",
-        message: redactSecrets(error instanceof Error ? error.message : String(error)),
+        message: safeDiagnosticMessage(error instanceof Error ? error.message : String(error)),
         endpoint: candidate.inputType === "citation" ? "citation-lookup" : "search",
         candidate: candidate.input,
         acceptedCount: 0,
