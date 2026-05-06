@@ -8562,6 +8562,37 @@ export interface CounterLawsuitComplaintDraftRetryInput {
   force?: boolean;
 }
 
+export interface CounterLawsuitRedTeamReportDiagnostic {
+  code: string;
+  severity: "info" | "warning" | "error";
+  message: string;
+  sourceDocumentKey?: string;
+  sourceTaskId?: string;
+  paragraphId?: string;
+  claimDraftId?: string;
+  findingId?: string;
+}
+
+export interface CounterLawsuitRedTeamReportSummary {
+  runId: string;
+  status: "completed" | "partial" | "blocked" | "failed" | "stale" | "not-run";
+  redTeamReportDocumentKey?: "red-team-report" | string;
+  statusDocumentKey?: "red-team-report-status" | string;
+  findingCount: number;
+  mtdAttackCount: number;
+  citationIssueCount: number;
+  revisionRecommendationCount: number;
+  unresolvedBlockerCount: number;
+  reviewedParagraphCount: number;
+  reviewedClaimCount: number;
+  diagnostics: CounterLawsuitRedTeamReportDiagnostic[];
+  safetyNotice: string;
+}
+
+export interface CounterLawsuitRedTeamReportRetryInput {
+  force?: boolean;
+}
+
 export interface StartCounterLawsuitPrototypeWorkflowResponse {
   runId: string;
   status: CounterLawsuitWorkflowRunStatus;
@@ -8584,6 +8615,7 @@ export interface StartCounterLawsuitPrototypeWorkflowResponse {
   evidenceLedger?: CounterLawsuitEvidenceLedgerSummary;
   claimMap?: CounterLawsuitClaimMapSummary;
   draftComplaint?: CounterLawsuitComplaintDraftSummary;
+  redTeamReport?: CounterLawsuitRedTeamReportSummary;
 }
 
 export interface CounterLawsuitWorkflowRunStatusResponse {
@@ -8601,6 +8633,7 @@ export interface CounterLawsuitWorkflowRunStatusResponse {
   evidenceLedger?: CounterLawsuitEvidenceLedgerSummary;
   claimMap?: CounterLawsuitClaimMapSummary;
   draftComplaint?: CounterLawsuitComplaintDraftSummary;
+  redTeamReport?: CounterLawsuitRedTeamReportSummary;
 }
 
 export function startCounterLawsuitPrototypeWorkflow(
@@ -8702,6 +8735,20 @@ export function runCounterLawsuitPrototypeDraftComplaint(
 ): Promise<CounterLawsuitComplaintDraftSummary> {
   return api<CounterLawsuitComplaintDraftSummary>(
     withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/draft-counter-lawsuit-complaint`, projectId),
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function runCounterLawsuitPrototypeRedTeamReport(
+  runId: string,
+  input: CounterLawsuitRedTeamReportRetryInput = {},
+  projectId?: string,
+): Promise<CounterLawsuitRedTeamReportSummary> {
+  return api<CounterLawsuitRedTeamReportSummary>(
+    withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/red-team-report`, projectId),
     {
       method: "POST",
       body: JSON.stringify(input),

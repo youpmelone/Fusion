@@ -304,6 +304,8 @@ describe("legal workflow routes", () => {
     expect(body.vaultMining.safetyNotice).toContain("not legally verified");
     expect(body.authorityValidation).toMatchObject({ runId: body.runId, status: "partial", validatedCount: 0 });
     expect(body.authorityValidation.safetyNotice).toContain("not good-law verification");
+    expect(body.redTeamReport).toMatchObject({ runId: body.runId, redTeamReportDocumentKey: "red-team-report" });
+    expect(body.redTeamReport.safetyNotice).toContain("not legal advice");
     expect(defaultStore.workflowSteps[0].prompt).toContain("draft-counter-lawsuit-complaint for draft complaint paragraphs");
     expect(defaultStore.workflowSteps[0].prompt).toContain("draft-counter-lawsuit-complaint-status");
     expect(defaultStore.workflowSteps[1].prompt).toContain("draft artifact to attack");
@@ -407,6 +409,7 @@ describe("legal workflow routes", () => {
     expect(body.vaultMining).toMatchObject({ runId, receiptsDocumentKey: "vault-mining-receipts" });
     expect(body.vaultMining.safetyNotice).toContain("not promoted for filing");
     expect(body.authorityValidation).toMatchObject({ runId, authorityValidationDocumentKey: "courtlistener-authority-validation" });
+    expect(body.redTeamReport).toMatchObject({ runId, redTeamReportDocumentKey: "red-team-report" });
   });
 
   it("GET returns 404 for unknown run IDs", async () => {

@@ -41,6 +41,14 @@ import {
   type CounterLawsuitComplaintDraftResult,
 } from "../legal-complaint-draft.js";
 import {
+  RED_TEAM_REPORT_DOCUMENT_KEY,
+  RED_TEAM_REPORT_SAFETY_NOTICE,
+  deriveRedTeamReportStatusForRun,
+  generateCounterLawsuitRedTeamReport,
+  type CounterLawsuitRedTeamReportResult,
+  type RedTeamDiagnostic,
+} from "../legal-red-team-report.js";
+import {
   COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY,
   COURTLISTENER_SAFETY_NOTICE,
   deriveAuthorityValidationStatusForRun,
@@ -153,6 +161,22 @@ export interface LegalWorkflowComplaintDraftSummary {
   missingProofCount: number;
   unresolvedGapCount: number;
   diagnostics: ComplaintDraftDiagnostic[];
+  safetyNotice: string;
+}
+
+export interface LegalWorkflowRedTeamReportSummary {
+  runId: string;
+  status: CounterLawsuitRedTeamReportResult["status"];
+  redTeamReportDocumentKey?: string;
+  statusDocumentKey?: string;
+  findingCount: number;
+  mtdAttackCount: number;
+  citationIssueCount: number;
+  revisionRecommendationCount: number;
+  unresolvedBlockerCount: number;
+  reviewedParagraphCount: number;
+  reviewedClaimCount: number;
+  diagnostics: RedTeamDiagnostic[];
   safetyNotice: string;
 }
 
@@ -558,6 +582,66 @@ function validateComplaintDraftRetryPayload(body: unknown): { force?: boolean } 
   return validateForceOnlyPayload(body, "draft complaint");
 }
 
+function redTeamReportFailureSummary(runId: string): LegalWorkflowRedTeamReportSummary {
+  return {
+    runId,
+    status: "failed",
+    redTeamReportDocumentKey: RED_TEAM_REPORT_DOCUMENT_KEY,
+    findingCount: 0,
+    mtdAttackCount: 0,
+    citationIssueCount: 0,
+    revisionRecommendationCount: 0,
+    unresolvedBlockerCount: 0,
+    reviewedParagraphCount: 0,
+    reviewedClaimCount: 0,
+    diagnostics: [{
+      code: "red-team-report-route-failed",
+      severity: "error",
+      message: "Opposing-counsel red-team report generation failed before a report summary could be returned. The workflow run remains queued; retry the red-team-report endpoint after checking prerequisite documents.",
+      sourceDocumentKey: RED_TEAM_REPORT_DOCUMENT_KEY,
+    }],
+    safetyNotice: RED_TEAM_REPORT_SAFETY_NOTICE,
+  };
+}
+
+async function runRedTeamReportForResponse(params: {
+  store: TaskStore;
+  runId: string;
+  force?: boolean;
+  deps: LegalWorkflowRouteDeps;
+}): Promise<LegalWorkflowRedTeamReportSummary> {
+  try {
+    const result = await generateCounterLawsuitRedTeamReport({
+      taskStore: params.store,
+      runId: params.runId,
+      force: params.force,
+      now: params.deps.now,
+    });
+    return {
+      runId: result.runId,
+      status: result.status,
+      redTeamReportDocumentKey: result.status === "not-run" ? undefined : result.redTeamReportDocumentKey,
+      statusDocumentKey: result.statusDocumentKey,
+      findingCount: result.counts.findings,
+      mtdAttackCount: result.counts.mtdAttacks,
+      citationIssueCount: result.counts.citationIssues,
+      revisionRecommendationCount: result.counts.revisionRecommendations,
+      unresolvedBlockerCount: result.counts.unresolvedBlockers,
+      reviewedParagraphCount: result.counts.reviewedParagraphs,
+      reviewedClaimCount: result.counts.reviewedClaims,
+      diagnostics: result.diagnostics,
+      safetyNotice: result.safetyNotice,
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.statusCode === 404) throw error;
+    return redTeamReportFailureSummary(params.runId);
+  }
+}
+
+function validateRedTeamReportRetryPayload(body: unknown): { force?: boolean } {
+  return validateForceOnlyPayload(body, "red-team report");
+}
+
 export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWorkflowRouteDeps = {}): void {
   const { router, getProjectContext, rethrowAsApiError } = ctx;
   const createAgentStore = deps.createAgentStore ?? defaultCreateAgentStore;
@@ -602,7 +686,12 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         runId: response.runId,
         deps,
       });
-      res.status(201).json({ ...response, vaultMining, authorityValidation, researchMemo, evidenceLedger, claimMap, draftComplaint });
+      const redTeamReport = await runRedTeamReportForResponse({
+        store: scopedStore,
+        runId: response.runId,
+        deps,
+      });
+      res.status(201).json({ ...response, vaultMining, authorityValidation, researchMemo, evidenceLedger, claimMap, draftComplaint, redTeamReport });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;
@@ -755,6 +844,30 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
     }
   });
 
+  router.post("/legal-workflows/counter-lawsuit/runs/:runId/red-team-report", async (req, res) => {
+    try {
+      if (!req.params.runId?.trim()) throw badRequest("runId is required");
+      const { store: scopedStore } = await getProjectContext(req);
+      const request = validateRedTeamReportRetryPayload(req.body);
+      await getCounterLawsuitWorkflowRunStatus({
+        taskStore: scopedStore,
+        runId: req.params.runId,
+      });
+      const redTeamReport = await runRedTeamReportForResponse({
+        store: scopedStore,
+        runId: req.params.runId,
+        force: request.force,
+        deps,
+      });
+      res.json(redTeamReport);
+    } catch (error: unknown) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      rethrowAsApiError(error);
+    }
+  });
+
   router.get("/legal-workflows/counter-lawsuit/runs/:runId", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
@@ -786,7 +899,11 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         taskStore: scopedStore,
         runId: req.params.runId,
       });
-      res.json({ ...status, vaultMining, authorityValidation, researchMemo, evidenceLedger, claimMap, draftComplaint });
+      const redTeamReport = await deriveRedTeamReportStatusForRun({
+        taskStore: scopedStore,
+        runId: req.params.runId,
+      });
+      res.json({ ...status, vaultMining, authorityValidation, researchMemo, evidenceLedger, claimMap, draftComplaint, redTeamReport });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;

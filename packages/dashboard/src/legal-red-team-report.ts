@@ -160,6 +160,13 @@ export interface CollectCounterLawsuitRedTeamInputsOptions {
   now?: () => Date;
 }
 
+export interface GenerateCounterLawsuitRedTeamReportOptions {
+  taskStore: Pick<TaskStore, "listTasks" | "getTaskDocument" | "upsertTaskDocument">;
+  runId: string;
+  force?: boolean;
+  now?: () => Date;
+}
+
 interface ParsedDocument {
   document: TaskDocument | null;
   source: RedTeamSourceDocumentSummary["parsedFrom"];
@@ -653,6 +660,163 @@ export function redTeamSummaryFromResult(result: CounterLawsuitRedTeamReportResu
     diagnostics: result.diagnostics,
     safetyNotice: result.safetyNotice,
   };
+}
+
+function buildRedTeamReportManifest(result: CounterLawsuitRedTeamReportResult): Record<string, unknown> {
+  return {
+    runId: result.runId,
+    generatedAt: result.generatedAt,
+    status: result.status,
+    claimMapTaskId: result.claimMapTaskId,
+    draftComplaintTaskId: result.draftComplaintTaskId,
+    redTeamTaskId: result.redTeamTaskId,
+    draftComplaintDocumentKey: result.draftComplaintDocumentKey,
+    redTeamReportDocumentKey: result.redTeamReportDocumentKey,
+    statusDocumentKey: RED_TEAM_REPORT_STATUS_DOCUMENT_KEY,
+    sourceDocuments: result.sourceDocuments,
+    findings: result.findings,
+    mtdAttacks: result.mtdAttacks,
+    citationIssues: result.citationIssues,
+    revisionRecommendations: result.revisionRecommendations,
+    diagnostics: result.diagnostics,
+    counts: result.counts,
+    safetyNotice: result.safetyNotice,
+  };
+}
+
+function escapeCell(value: string): string {
+  return value.replace(/\|/g, "\\|");
+}
+
+function formatDiagnostics(diagnostics: RedTeamDiagnostic[]): string {
+  return diagnostics.map((diagnostic) => `- ${diagnostic.severity.toUpperCase()} ${diagnostic.code}${diagnostic.findingId ? ` (${diagnostic.findingId})` : ""}${diagnostic.claimDraftId ? ` claim ${diagnostic.claimDraftId}` : ""}${diagnostic.paragraphId ? ` paragraph ${diagnostic.paragraphId}` : ""}${diagnostic.sourceDocumentKey ? ` [${diagnostic.sourceDocumentKey}]` : ""}: ${diagnostic.message}`).join("\n") || "- None.";
+}
+
+export function buildRedTeamReportMarkdown(result: CounterLawsuitRedTeamReportResult): string {
+  const manifest = buildRedTeamReportManifest(result);
+  const findingRows = result.findings.map((finding) => `| ${finding.findingId} | ${finding.category} | ${finding.severity} | ${escapeCell(finding.summary)} | ${finding.paragraphIds.join(", ") || "none"} | ${finding.claimDraftIds.join(", ") || "none"} | ${finding.sourcePaths.map(escapeCell).join("<br>") || "missing source path"} | true |`).join("\n");
+  const attackRows = result.mtdAttacks.map((attack) => `| ${attack.attackId} | ${attack.category} | ${attack.severity} | ${escapeCell(attack.summary)} | ${attack.paragraphIds.join(", ") || "none"} | ${attack.claimDraftIds.join(", ") || "none"} | true |`).join("\n");
+  const citationRows = result.citationIssues.map((issue) => `| ${issue.issueId} | ${issue.severity} | ${escapeCell(issue.summary)} | ${issue.sourcePaths.map(escapeCell).join("<br>") || "missing source path"} | ${issue.receiptIds.join(", ") || "missing receipt"} | ${issue.authorityRecordIds.join(", ") || "none"} | ${issue.citationStatusIds.join(", ") || "none"} | true |`).join("\n");
+  const revisionRows = result.revisionRecommendations.map((recommendation) => `| ${recommendation.recommendationId} | ${recommendation.findingIds.join(", ") || "none"} | ${escapeCell(recommendation.summary)} | ${recommendation.paragraphIds.join(", ") || "none"} | ${recommendation.claimDraftIds.join(", ") || "none"} | true |`).join("\n");
+  return `# Opposing-counsel red-team report
+
+${RED_TEAM_REPORT_SAFETY_NOTICE}
+
+## Run context
+
+- Workflow run ID: ${result.runId}
+- Claim map task ID: ${result.claimMapTaskId ?? "unknown"}
+- Draft complaint task ID: ${result.draftComplaintTaskId ?? "unknown"}
+- Red-team task ID: ${result.redTeamTaskId ?? "unknown"}
+- Generated at: ${result.generatedAt}
+- Status: ${result.status}
+
+## Safety boundary
+
+This is an adversarial issue-spotting artifact only. It does not verify facts, law, good-law status, citation format, attorney judgment, real motion practice, filing readiness, or blocker resolution.
+
+## Reviewed draft scope
+
+- Reviewed paragraphs: ${result.counts.reviewedParagraphs}
+- Reviewed claims: ${result.counts.reviewedClaims}
+- Source references: ${result.counts.sourceReferences}
+- Source paths: ${result.counts.sourcePaths}
+
+## Weakness findings
+
+| Finding | Category | Severity | Summary | Paragraphs | Draft claims | Source paths | Unresolved |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+${findingRows || "| — | upstream-blocker | blocker | No reviewable draft complaint manifest was available. | none | none | missing source path | true |"}
+
+## Candidate MTD attack rows
+
+| Attack | Category | Severity | Draft-risk-only summary | Paragraphs | Draft claims | Draft risk only |
+| --- | --- | --- | --- | --- | --- | --- |
+${attackRows || "| — | unavailable | blocker | No candidate MTD attack rows can be generated without a reviewable draft complaint manifest. | none | none | true |"}
+
+## Citation and source issues
+
+| Issue | Severity | Summary | Source paths | Receipts | Authority records | Citation statuses | Human verification required |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+${citationRows || "| — | warning | No citation issue rows were generated, but human citation and source review remains required. | missing source path | missing receipt | none | none | true |"}
+
+## Conservative revision recommendations
+
+| Recommendation | Findings | Summary | Paragraphs | Draft claims | Unresolved |
+| --- | --- | --- | --- | --- | --- |
+${revisionRows || "| — | none | Keep the report unresolved until a source-linked draft complaint exists and qualified human review is available. | none | none | true |"}
+
+## Diagnostics
+
+${formatDiagnostics(result.diagnostics)}
+
+## Machine-readable manifest
+
+\`\`\`json
+${JSON.stringify(manifest, null, 2)}
+\`\`\`
+`;
+}
+
+function statusDocumentInput(result: CounterLawsuitRedTeamReportResult): { key: string; content: string; metadata: Record<string, unknown>; author: string } {
+  const metadata = {
+    runId: result.runId,
+    status: result.status,
+    redTeamReportDocumentKey: RED_TEAM_REPORT_DOCUMENT_KEY,
+    statusDocumentKey: RED_TEAM_REPORT_STATUS_DOCUMENT_KEY,
+    findingCount: result.counts.findings,
+    mtdAttackCount: result.counts.mtdAttacks,
+    citationIssueCount: result.counts.citationIssues,
+    revisionRecommendationCount: result.counts.revisionRecommendations,
+    unresolvedBlockerCount: result.counts.unresolvedBlockers,
+    reviewedParagraphCount: result.counts.reviewedParagraphs,
+    reviewedClaimCount: result.counts.reviewedClaims,
+    diagnostics: result.diagnostics,
+    safetyNotice: RED_TEAM_REPORT_SAFETY_NOTICE,
+  };
+  return {
+    key: RED_TEAM_REPORT_STATUS_DOCUMENT_KEY,
+    content: `# Opposing-counsel red-team report status\n\nStatus: ${result.status}\n\n${RED_TEAM_REPORT_SAFETY_NOTICE}\n\n${formatDiagnostics(result.diagnostics)}\n\n\`\`\`json\n${JSON.stringify(metadata, null, 2)}\n\`\`\`\n`,
+    metadata,
+    author: "fusion-legal-red-team-report",
+  };
+}
+
+export async function generateCounterLawsuitRedTeamReport(options: GenerateCounterLawsuitRedTeamReportOptions): Promise<CounterLawsuitRedTeamReportResult> {
+  void options.force;
+  const result = await collectCounterLawsuitRedTeamInputs(options);
+  const taskId = result.redTeamTaskId;
+  if (!taskId) return result;
+  try {
+    await options.taskStore.upsertTaskDocument(taskId, {
+      key: RED_TEAM_REPORT_DOCUMENT_KEY,
+      content: buildRedTeamReportMarkdown(result),
+      author: "fusion-legal-red-team-report",
+      metadata: buildRedTeamReportManifest(result),
+    });
+    if (result.status !== "completed") {
+      await options.taskStore.upsertTaskDocument(taskId, statusDocumentInput(result));
+    } else {
+      const staleStatus = await options.taskStore.getTaskDocument(taskId, RED_TEAM_REPORT_STATUS_DOCUMENT_KEY).catch(() => null);
+      if (staleStatus) await options.taskStore.upsertTaskDocument(taskId, statusDocumentInput({ ...result, statusDocumentKey: RED_TEAM_REPORT_STATUS_DOCUMENT_KEY }));
+    }
+    return result;
+  } catch (error) {
+    const failedResult: CounterLawsuitRedTeamReportResult = {
+      ...result,
+      status: "failed",
+      statusDocumentKey: RED_TEAM_REPORT_STATUS_DOCUMENT_KEY,
+      diagnostics: [...result.diagnostics, {
+        code: "red-team-report-generation-failed",
+        severity: "error",
+        message: `Red-team report generation failed: ${error instanceof Error ? boundedText(error.message, 500) : boundedText(String(error), 500)}`,
+        sourceDocumentKey: RED_TEAM_REPORT_DOCUMENT_KEY,
+        sourceTaskId: taskId,
+      }],
+    };
+    await options.taskStore.upsertTaskDocument(taskId, statusDocumentInput(failedResult));
+    return failedResult;
+  }
 }
 
 function summaryFromManifest(params: { runId: string; manifest: Record<string, unknown>; statusDocPresent: boolean }): CounterLawsuitRedTeamReportSummary {

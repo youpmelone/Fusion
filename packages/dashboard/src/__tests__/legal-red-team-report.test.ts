@@ -5,8 +5,10 @@ import {
   RED_TEAM_REPORT_DOCUMENT_KEY,
   RED_TEAM_REPORT_SAFETY_NOTICE,
   RED_TEAM_REPORT_STATUS_DOCUMENT_KEY,
+  buildRedTeamReportMarkdown,
   collectCounterLawsuitRedTeamInputs,
   deriveRedTeamReportStatusForRun,
+  generateCounterLawsuitRedTeamReport,
   locateCounterLawsuitRedTeamStageTasks,
   redTeamSummaryFromResult,
 } from "../legal-red-team-report.js";
@@ -49,6 +51,22 @@ class FakeTaskStore {
 
   async getTaskDocument(taskId: string, key: string): Promise<TaskDocument | null> {
     return this.documents.get(`${taskId}:${key}`) ?? null;
+  }
+
+  async upsertTaskDocument(taskId: string, input: { key: string; content: string; metadata?: Record<string, unknown>; author?: string }): Promise<TaskDocument> {
+    const document = {
+      id: `${taskId}:${input.key}`,
+      taskId,
+      key: input.key,
+      content: input.content,
+      revision: 1,
+      author: input.author ?? "test",
+      metadata: input.metadata,
+      createdAt: "now",
+      updatedAt: "now",
+    } as TaskDocument;
+    this.documents.set(`${taskId}:${input.key}`, document);
+    return document;
   }
 
   setDocument(taskId: string, key: string, content: string, metadata?: Record<string, unknown>): void {
@@ -212,6 +230,31 @@ describe("red-team report input collection", () => {
     expect(serialized).toContain("[REDACTED]");
     expect(serialized).not.toContain("super-secret-token-value");
     expect(result.diagnostics[0].message.length).toBeLessThanOrEqual(500);
+  });
+
+  it("persists the red-team report and status documents from persisted complaint documents only", async () => {
+    const store = new FakeTaskStore();
+    seedComplaint(store, { status: "blocked" });
+    const result = await generateCounterLawsuitRedTeamReport({ taskStore: store as never, runId: "CLW-1", force: true });
+    expect(result.status).toBe("blocked");
+    const report = await store.getTaskDocument("FN-5", RED_TEAM_REPORT_DOCUMENT_KEY);
+    const status = await store.getTaskDocument("FN-5", RED_TEAM_REPORT_STATUS_DOCUMENT_KEY);
+    expect(report?.content).toContain("Opposing-counsel red-team report");
+    expect(report?.content).toContain("Candidate MTD attack rows");
+    expect(report?.metadata).toMatchObject({ runId: "CLW-1", redTeamReportDocumentKey: RED_TEAM_REPORT_DOCUMENT_KEY });
+    expect(status?.content).toContain("Status: blocked");
+    expect(status?.metadata).toMatchObject({ status: "blocked", reviewedParagraphCount: 2 });
+    await expect(deriveRedTeamReportStatusForRun({ taskStore: store as never, runId: "CLW-1" })).resolves.toMatchObject({ status: "blocked", redTeamReportDocumentKey: RED_TEAM_REPORT_DOCUMENT_KEY });
+  });
+
+  it("builds Markdown with a machine-readable manifest and safety language", async () => {
+    const store = new FakeTaskStore();
+    seedComplaint(store);
+    const result = await collectCounterLawsuitRedTeamInputs({ taskStore: store as never, runId: "CLW-1" });
+    const markdown = buildRedTeamReportMarkdown(result);
+    expect(markdown).toContain("Machine-readable manifest");
+    expect(markdown).toContain("not legal advice");
+    expect(markdown).toContain(RED_TEAM_REPORT_DOCUMENT_KEY);
   });
 
   it("exports the draft-only adversarial safety notice", () => {
