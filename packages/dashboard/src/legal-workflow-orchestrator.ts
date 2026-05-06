@@ -416,7 +416,7 @@ Use the existing installed Codex legal skills assigned to this durable agent (${
 Do not embed, rewrite, or vendor Codex legal skill content in this task. Invoke the installed skills through the agent runtime skill-selection path.
 
 ## Integration handoff
-Mine facts through QMD MCP and Obsidian MCP when those integrations are available. Use CourtListener validation where legal authority validation is available.
+${stage.stage === "research-memo" ? "Before drafting the research memo, read task document key `vault-mining-receipts` as the required first source manifest when it exists. Treat every vault-mining receipt as source-linked but unverified until later safety gates pass.\n\n" : ""}Mine facts through QMD MCP and Obsidian MCP when those integrations are available. Use CourtListener validation where legal authority validation is available.
 
 If QMD MCP, Obsidian MCP, CourtListener, or any other integration is unavailable, explicitly mark the affected facts, evidence, authorities, or receipts as unverified. Do not invent citations, quotes, docket entries, or source receipts.
 
@@ -462,7 +462,7 @@ function buildStageDocument(params: {
 ${stage.promptPurpose}
 
 ## Integration expectations
-Use existing installed Codex legal skills through assigned-agent metadata. Mine facts through QMD MCP and Obsidian MCP when available. Validate authorities through CourtListener when available. Mark unavailable integration results as unverified rather than inventing citations.
+${stage.stage === "research-memo" ? "Read task document key `vault-mining-receipts` as the required first source manifest when present. It contains source-linked receipts only; it does not legally verify facts or validate citations.\n\n" : ""}Use existing installed Codex legal skills through assigned-agent metadata. Mine facts through QMD MCP and Obsidian MCP when available. Validate authorities through CourtListener when available. Mark unavailable integration results as unverified rather than inventing citations.
 
 ## Safety boundary
 Outputs are drafts only. They are not promoted or reliable until source/citation verification, opposing-counsel red-team review, lineage preservation, and qualified human verification pass.`;

@@ -43,7 +43,7 @@ function makeInteractiveData(opts: {
     regeneratePersistentToken: () => Promise<{ maskedToken?: string; tokenType: "persistent"; expiresAt: null }>;
     generateShortLivedToken: (ttlMs: number) => Promise<{ token?: string; tokenType: "short-lived"; expiresAt: string | null }>;
     getRemoteUrl: (tokenType: "persistent" | "short-lived", ttlMs?: number) => Promise<{ url: string; tokenType: "persistent" | "short-lived"; expiresAt: string | null }>;
-    getQrPayload: (tokenType: "persistent" | "short-lived", ttlMs?: number) => Promise<{ url: string; expiresAt: string | null; format: "text" | "image/svg"; data?: string }>;
+    getQrPayload: (tokenType: "persistent" | "short-lived", ttlMs?: number, format?: "text" | "terminal" | "image/svg") => Promise<{ url: string; expiresAt: string | null; format: "text" | "image/svg" | "terminal"; data?: string }>;
   }>;
 } = {}) {
   const projects = opts.projects ?? [];

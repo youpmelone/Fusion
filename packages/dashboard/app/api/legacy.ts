@@ -5978,7 +5978,7 @@ export type MilestoneStatus = "planning" | "active" | "blocked" | "complete";
 export type SliceStatus = "pending" | "active" | "complete";
 
 /** Feature status values */
-export type FeatureStatus = "defined" | "triaged" | "in-progress" | "done";
+export type FeatureStatus = "defined" | "triaged" | "in-progress" | "done" | "blocked";
 
 /** Autopilot state values for mission autonomous progression */
 export type AutopilotState = "inactive" | "watching" | "activating" | "completing";
@@ -8376,6 +8376,36 @@ export interface CounterLawsuitWorkflowStageTask {
   assignedAgentId?: string;
 }
 
+export interface CounterLawsuitVaultMiningDiagnostic {
+  providerName: string;
+  sourceSystem?: string;
+  mcpServerName?: string;
+  status: "available" | "unavailable" | "partial" | "error" | "skipped";
+  message: string;
+  toolName?: string;
+  acceptedCount?: number;
+  rejectedCount?: number;
+}
+
+export interface CounterLawsuitVaultMiningSummary {
+  runId: string;
+  status: "completed" | "partial" | "unavailable" | "failed" | "not-run";
+  researchRunId?: string;
+  receiptCount: number;
+  receiptsDocumentKey?: "vault-mining-receipts" | string;
+  statusDocumentKey?: "vault-mining-status" | string;
+  providerDiagnostics: CounterLawsuitVaultMiningDiagnostic[];
+  safetyNotice: string;
+}
+
+export interface CounterLawsuitVaultMiningRetryInput {
+  queries?: string[];
+  maxQueries?: number;
+  maxResultsPerProvider?: number;
+  qmd?: { serverName?: string; searchToolName?: string };
+  obsidian?: { serverName?: string; searchToolName?: string; readToolName?: string };
+}
+
 export interface StartCounterLawsuitPrototypeWorkflowResponse {
   runId: string;
   status: CounterLawsuitWorkflowRunStatus;
@@ -8392,6 +8422,7 @@ export interface StartCounterLawsuitPrototypeWorkflowResponse {
   sourceScopeStatus?: "specified" | "unspecified";
   codexSkillNames?: string[];
   codexSkillSource?: "default" | "user";
+  vaultMining?: CounterLawsuitVaultMiningSummary;
 }
 
 export interface CounterLawsuitWorkflowRunStatusResponse {
@@ -8403,6 +8434,7 @@ export interface CounterLawsuitWorkflowRunStatusResponse {
   safetyGates: string[];
   sourceScopeStatus: "specified" | "unspecified";
   lineageDocuments: Array<{ taskId: string; documentKey: string; stage: string }>;
+  vaultMining?: CounterLawsuitVaultMiningSummary;
 }
 
 export function startCounterLawsuitPrototypeWorkflow(
@@ -8424,6 +8456,20 @@ export function fetchCounterLawsuitPrototypeWorkflowRunStatus(
 ): Promise<CounterLawsuitWorkflowRunStatusResponse> {
   return api<CounterLawsuitWorkflowRunStatusResponse>(
     withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}`, projectId),
+  );
+}
+
+export function runCounterLawsuitPrototypeVaultMining(
+  runId: string,
+  input: CounterLawsuitVaultMiningRetryInput = {},
+  projectId?: string,
+): Promise<CounterLawsuitVaultMiningSummary> {
+  return api<CounterLawsuitVaultMiningSummary>(
+    withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/vault-mining`, projectId),
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
   );
 }
 

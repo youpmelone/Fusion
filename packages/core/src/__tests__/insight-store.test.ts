@@ -963,4 +963,56 @@ describe("Migration: pre-33 DB upgrade", () => {
       rmSync(testDir, { recursive: true, force: true });
     }
   });
+
+  it("ensureInsightRunsSchemaCompatibility adds lifecycle column to legacy table", () => {
+    const compatDir = mkdtempSync(join(tmpdir(), "fn-insight-compat-"));
+
+    try {
+      // Step 1: Create a fresh DB and run migrations
+      const db1 = createDatabase(compatDir);
+      db1.init();
+      expect(db1.getSchemaVersion()).toBe(62);
+
+      // Step 2: Strip lifecycle and cancelledAt columns by recreating the
+      // table without them. This simulates a DB that was created before the
+      // lifecycle columns were added and already past v59 when they landed.
+      db1.exec(`
+        CREATE TABLE project_insight_runs_legacy AS
+          SELECT id, projectId, trigger, status, summary, error,
+                 insightsCreated, insightsUpdated, inputMetadata, outputMetadata,
+                 createdAt, startedAt, completedAt
+          FROM project_insight_runs
+      `);
+      db1.exec("DROP TABLE project_insight_runs");
+      db1.exec("ALTER TABLE project_insight_runs_legacy RENAME TO project_insight_runs");
+
+      // Verify lifecycle column is gone
+      const colsBefore = db1.prepare("PRAGMA table_info(project_insight_runs)").all() as Array<{ name: string }>;
+      const colNamesBefore = colsBefore.map((c) => c.name);
+      expect(colNamesBefore).not.toContain("lifecycle");
+      expect(colNamesBefore).not.toContain("cancelledAt");
+      db1.close();
+
+      // Step 3: Re-open — ensureInsightRunsSchemaCompatibility should add the
+      // missing columns unconditionally.
+      const db2 = createDatabase(compatDir);
+      db2.init();
+
+      const colsAfter = db2.prepare("PRAGMA table_info(project_insight_runs)").all() as Array<{ name: string }>;
+      const colNamesAfter = colsAfter.map((c) => c.name);
+      expect(colNamesAfter).toContain("lifecycle");
+      expect(colNamesAfter).toContain("cancelledAt");
+
+      // Step 4: Creating a run must not throw — proves the INSERT path works
+      // with the restored columns.
+      const s = new InsightStore(db2);
+      const run = s.createRun("proj", { trigger: "manual" });
+      expect(run.id).toBeTruthy();
+      expect(run.lifecycle).toBeDefined();
+
+      db2.close();
+    } finally {
+      rmSync(compatDir, { recursive: true, force: true });
+    }
+  });
 });

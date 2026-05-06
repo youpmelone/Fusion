@@ -231,6 +231,7 @@ describe("PluginManager", () => {
     expect(screen.getByText("Paperclip Runtime")).toBeTruthy();
     expect(screen.getByText("OpenClaw Runtime")).toBeTruthy();
     expect(screen.getByText("Droid Runtime")).toBeTruthy();
+    expect(screen.getByText("Dependency Graph")).toBeTruthy();
   });
 
   it("installs bundled plugins from the bundled plugin section", async () => {
@@ -253,6 +254,26 @@ describe("PluginManager", () => {
     });
   });
 
+  it("installs dependency graph from the bundled plugin section", async () => {
+    render(<PluginManager addToast={addToast} />);
+
+    await waitFor(() => {
+      expect(fetchPlugins).toHaveBeenCalled();
+    });
+
+    const graphLabel = await screen.findByText("Dependency Graph");
+    const graphCard = graphLabel.closest(".plugin-bundled-runtime-item");
+    expect(graphCard).toBeTruthy();
+
+    const installButton = within(graphCard as HTMLElement).getByRole("button", { name: /Install Dependency Graph/i });
+    await userEvent.click(installButton);
+
+    await waitFor(() => {
+      expect(installPlugin).toHaveBeenCalledWith({ path: "./plugins/fusion-plugin-dependency-graph" }, undefined);
+      expect(addToast).toHaveBeenCalledWith("Dependency Graph installed successfully", "success");
+    });
+  });
+
   it("renders plugin list when plugins are available", async () => {
     vi.mocked(fetchPlugins).mockResolvedValueOnce(mockPlugins);
 
@@ -266,6 +287,7 @@ describe("PluginManager", () => {
     expect(screen.getByText("v1.0.0")).toBeTruthy();
     expect(screen.getByText("v2.0.0")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Bundled Plugins" })).toBeTruthy();
+    expect(screen.getByText("Dependency Graph")).toBeTruthy();
     expect(screen.getAllByText("Not installed").length).toBeGreaterThan(0);
   });
 
@@ -505,32 +527,32 @@ describe("PluginManager", () => {
     });
   });
 
-  it("keeps bundled plugin manageable after install", async () => {
+  it("shows Manage for bundled dependency graph when already installed", async () => {
     vi.mocked(fetchPlugins).mockResolvedValueOnce([
       {
         ...mockPlugins[0],
-        id: "fusion-plugin-hermes-runtime",
-        name: "Hermes Runtime Plugin",
+        id: "fusion-plugin-dependency-graph",
+        name: "Dependency Graph",
       },
     ]);
 
     render(<PluginManager addToast={addToast} />);
 
     await waitFor(() => {
-      expect(screen.getByText("Hermes Runtime")).toBeTruthy();
+      expect(screen.getAllByText("Dependency Graph").length).toBeGreaterThanOrEqual(2);
     });
 
-    const hermesCard = screen.getByText("Hermes Runtime").closest(".plugin-bundled-runtime-item");
-    expect(hermesCard).toBeTruthy();
+    const graphCard = screen.getAllByText("Dependency Graph")[1]?.closest(".plugin-bundled-runtime-item");
+    expect(graphCard).toBeTruthy();
 
-    const manageButton = within(hermesCard as HTMLElement).getByRole("button", { name: /^Manage$/i });
+    const manageButton = within(graphCard as HTMLElement).getByRole("button", { name: /^Manage$/i });
     expect(manageButton).not.toBeDisabled();
-    expect(within(hermesCard as HTMLElement).getAllByText("Installed").length).toBeGreaterThanOrEqual(1);
+    expect(within(graphCard as HTMLElement).getAllByText("Installed").length).toBeGreaterThanOrEqual(1);
 
     await userEvent.click(manageButton);
 
     await waitFor(() => {
-      expect(fetchPluginSettings).toHaveBeenCalledWith("fusion-plugin-hermes-runtime", undefined);
+      expect(fetchPluginSettings).toHaveBeenCalledWith("fusion-plugin-dependency-graph", undefined);
     });
 
     expect(screen.getByTestId("plugin-manager-detail")).toBeTruthy();

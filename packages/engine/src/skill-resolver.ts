@@ -471,7 +471,10 @@ export function createSkillsOverrideFromSelection(
     if (newDiagnostics.length > 0) {
       const _purpose = sessionPurpose ? `[${sessionPurpose}]` : "skills";
       for (const diag of newDiagnostics) {
-        piLog.warn(`[skills] ${diag.type}: ${diag.message}`);
+        const msg = `[skills] ${diag.type}: ${diag.message}`;
+        if (diag.type === "error") piLog.error(msg);
+        else if (diag.type === "warning") piLog.warn(msg);
+        else piLog.log(msg);
       }
     }
 

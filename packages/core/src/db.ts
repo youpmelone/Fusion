@@ -1068,6 +1068,7 @@ export class Database {
 
     // Compatibility backfills that must run even when schemaVersion is current.
     this.ensureRoutinesSchemaCompatibility();
+    this.ensureInsightRunsSchemaCompatibility();
 
     // Seed config row idempotently with default settings
     const configNow = new Date().toISOString();
@@ -1120,6 +1121,25 @@ export class Database {
     this.db.exec("CREATE INDEX IF NOT EXISTS idxRoutinesNextRunAt ON routines(nextRunAt)");
     this.db.exec("CREATE INDEX IF NOT EXISTS idxRoutinesEnabled ON routines(enabled)");
     this.db.exec("CREATE INDEX IF NOT EXISTS idxRoutinesScope ON routines(scope)");
+  }
+
+  /**
+   * Applies idempotent compatibility fixes for the project_insight_runs table.
+   *
+   * The `lifecycle` and `cancelledAt` columns were added to SCHEMA_SQL and
+   * retroactively inserted into migration v33's CREATE TABLE, with a safety-net
+   * in migration v59.  However, databases that were already at v59+ when the
+   * commit landed never re-run v59, leaving the columns missing.  Running this
+   * unconditionally on every init guarantees the columns exist.
+   */
+  private ensureInsightRunsSchemaCompatibility(): void {
+    if (!this.hasTable("project_insight_runs")) {
+      return;
+    }
+
+    this.addColumnIfMissing("project_insight_runs", "lifecycle", "TEXT");
+    this.addColumnIfMissing("project_insight_runs", "cancelledAt", "TEXT");
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idxInsightRunsProjectTriggerStatus ON project_insight_runs(projectId, trigger, status)`);
   }
 
   private migrate(): void {

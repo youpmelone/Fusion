@@ -175,6 +175,18 @@ html {
   --xsmall-breakpoint: 640px;
 }
 
+/* Global spinner animation — used by 25+ components via className="animate-spin"
+   or inline animation: "spin ...". Must live at the stylesheet top level (not
+   inside any selector block) so the keyframes and utility class are available
+   before any task cards are loaded. */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
 :root {
   --bg: #0d1117;
   --surface: #161b22;

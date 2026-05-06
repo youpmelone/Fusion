@@ -4580,10 +4580,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
 
       const elapsed = Date.now() - startTime;
-      if (elapsed > 100) {
+      if (elapsed > 750) {
         storeLog.warn("checkForChanges took longer than expected", {
           elapsedMs: elapsed,
-          thresholdMs: 100,
+          thresholdMs: 750,
         });
       }
     } catch (err) {

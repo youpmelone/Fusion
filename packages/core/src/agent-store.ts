@@ -1743,6 +1743,25 @@ export class AgentStore extends EventEmitter {
       .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
   }
 
+  /**
+   * List every heartbeat run currently in `status = 'active'` across all
+   * agents. Used by self-healing to detect orphaned runs from prior process
+   * incarnations that crashed before calling endHeartbeatRun(). Without this
+   * sweep an active row blocks all subsequent timer ticks for the agent
+   * because HeartbeatTriggerScheduler.onTimerTick treats any active run as
+   * "already running".
+   */
+  async listActiveHeartbeatRuns(): Promise<AgentHeartbeatRun[]> {
+    const rows = this.db.prepare(`
+      SELECT data FROM agentRuns
+      WHERE status = 'active'
+      ORDER BY startedAt ASC
+    `).all() as Array<{ data: string }>;
+    return rows
+      .map((row) => this.parseJson<AgentHeartbeatRun | null>(row.data, null))
+      .filter((run): run is AgentHeartbeatRun => run !== null);
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Task Session Management
   // ─────────────────────────────────────────────────────────────────────────

@@ -204,6 +204,7 @@ export class SelfHealingManager {
       { name: "approved-triage", fn: () => this.recoverApprovedTriageTasks().then(() => undefined) },
       { name: "orphaned-planning", fn: () => this.recoverOrphanedPlanningTasks().then(() => undefined) },
       { name: "recover-orphaned-agents", fn: () => this.recoverOrphanedAgents().then(() => undefined) },
+      { name: "recover-stale-heartbeat-runs", fn: () => this.recoverStaleHeartbeatRuns().then(() => undefined) },
     ];
 
     for (const step of steps) {
@@ -658,6 +659,7 @@ export class SelfHealingManager {
           { name: "recover-orphaned-planning", fn: () => this.recoverOrphanedPlanningTasks() },
           { name: "recover-ghost-review", fn: () => this.recoverGhostReviewTasks() },
           { name: "recover-orphaned-agents", fn: () => this.recoverOrphanedAgents() },
+          { name: "recover-stale-heartbeat-runs", fn: () => this.recoverStaleHeartbeatRuns() },
         ];
         for (const fn of batch2Fns) {
           try {
@@ -1517,6 +1519,104 @@ export class SelfHealingManager {
       log.error(`Orphaned agent recovery failed: ${errorMessage}`);
       return 0;
     }
+  }
+
+  /**
+   * Default cap (in ms) on how long an active heartbeat run from the current
+   * process is allowed to remain open before self-healing will terminate it.
+   * Six hours is well past any legitimate heartbeat tick (default 1 h
+   * interval, configurable up to a few hours) so reaching this threshold
+   * means the run record was never closed — typically a process that died
+   * without our watchdog catching it.
+   */
+  private static readonly STALE_ACTIVE_RUN_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+  /**
+   * Terminate orphaned `agentRuns` rows left in `status = 'active'` by a
+   * process that crashed before calling endHeartbeatRun(). These rows
+   * silently break heartbeat scheduling: HeartbeatTriggerScheduler.onTimerTick
+   * skips every tick that finds an active run, so the agent never gets called
+   * again until something cleans up.
+   *
+   * A run is considered stale when:
+   *  - `processPid` was recorded and does not match the current `process.pid`
+   *    (i.e., the writer process is gone — guaranteed orphan), or
+   *  - `processPid` is missing (legacy data), or
+   *  - the run has been active for longer than STALE_ACTIVE_RUN_MAX_AGE_MS,
+   *    even from the current process (defense in depth against a writer that
+   *    leaks the row without crashing the whole runtime).
+   *
+   * The matching `processPid` + young run case is left alone — that is a
+   * legitimately in-flight heartbeat.
+   */
+  async recoverStaleHeartbeatRuns(): Promise<number> {
+    const agentStore = this.options.agentStore;
+    if (!agentStore) {
+      return 0;
+    }
+
+    let activeRuns;
+    try {
+      activeRuns = await agentStore.listActiveHeartbeatRuns();
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.error(`Stale heartbeat run recovery — listing failed: ${errorMessage}`);
+      return 0;
+    }
+
+    if (activeRuns.length === 0) {
+      return 0;
+    }
+
+    const now = Date.now();
+    const currentPid = process.pid;
+    const maxAgeMs = SelfHealingManager.STALE_ACTIVE_RUN_MAX_AGE_MS;
+    let recovered = 0;
+
+    for (const run of activeRuns) {
+      const startedMs = Date.parse(run.startedAt);
+      const ageMs = Number.isFinite(startedMs) ? Math.max(0, now - startedMs) : Infinity;
+      const recordedPid = run.processPid;
+
+      const pidMismatch = typeof recordedPid === "number" && recordedPid !== currentPid;
+      const pidMissing = typeof recordedPid !== "number";
+      const tooOld = ageMs >= maxAgeMs;
+
+      if (!pidMismatch && !pidMissing && !tooOld) {
+        continue;
+      }
+
+      const reason = pidMismatch
+        ? `writer pid ${recordedPid} is no longer this process (current pid ${currentPid})`
+        : pidMissing
+          ? `no processPid recorded`
+          : `active for ${Math.round(ageMs / 1000)}s (>= ${Math.round(maxAgeMs / 1000)}s threshold)`;
+
+      try {
+        const detail = await agentStore.getRunDetail(run.agentId, run.id);
+        if (detail) {
+          await agentStore.saveRun({
+            ...detail,
+            endedAt: new Date().toISOString(),
+            status: "terminated",
+            stderrExcerpt: `Auto-recovered orphaned heartbeat run: ${reason}`,
+          });
+        }
+        await agentStore.endHeartbeatRun(run.id, "terminated");
+        log.log(
+          `Auto-recovered: orphan heartbeat run ${run.id} for ${run.agentId} (${reason})`,
+        );
+        recovered++;
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        log.error(`Failed to recover stale heartbeat run ${run.id} for ${run.agentId}: ${errorMessage}`);
+      }
+    }
+
+    if (recovered > 0) {
+      log.log(`Recovered ${recovered} stale heartbeat run(s)`);
+    }
+    return recovered;
   }
 
   /**

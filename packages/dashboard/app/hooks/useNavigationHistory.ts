@@ -31,12 +31,12 @@ export interface UseNavigationHistoryResult {
  * Centralized back-navigation hook that integrates the browser History API
  * (`pushState`/`popstate`) with modal and view state machines.
  *
- * On mobile, every modal open and view change pushes a history entry so that
- * the Android hardware back button and iOS swipe-back gesture dismiss the
- * top modal or revert to the previous view.
+ * Every modal open and view change pushes a history entry so that the
+ * browser back button dismisses the top modal or reverts to the previous
+ * view. Works on both desktop and mobile.
  *
- * On desktop (`enabled: false`), all operations are no-ops and no `popstate`
- * listener is registered, leaving desktop behavior completely unchanged.
+ * When `enabled` is false, all operations are no-ops and no `popstate`
+ * listener is registered.
  */
 export function useNavigationHistory(
   options: UseNavigationHistoryOptions,

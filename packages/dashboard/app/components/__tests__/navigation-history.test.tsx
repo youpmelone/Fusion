@@ -1,11 +1,11 @@
 /**
- * Integration tests for mobile back-navigation (Android back button / iOS swipe-back).
+ * Integration tests for browser back-navigation within the SPA.
  *
  * Verifies that the useNavigationHistory hook integration in App.tsx correctly:
- * - Does NOT push history entries when opening modals on desktop
- * - Does NOT dismiss modals on popstate on desktop
- * - Pushes history entries when opening modals on mobile
- * - Dismisses modals on popstate on mobile
+ * - Pushes history entries when opening modals (both desktop and mobile)
+ * - Dismisses modals on popstate (both desktop and mobile)
+ * - Pushes history entries when changing views
+ * - Reverts view changes on popstate
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
@@ -375,10 +375,11 @@ describe("Navigation history integration", () => {
     return result;
   }
 
-  // 1. Desktop: opening Settings does NOT push history entry
-  it("does not push history entry when opening Settings modal on desktop", async () => {
+  // 1. Desktop: opening Settings pushes a history entry
+  it("pushes history entry when opening Settings modal on desktop", async () => {
     await renderAppAndWait();
 
+    const pushCallsBefore = (window.history.pushState as any).mock.calls.length;
     const settingsBtn = screen.getByTitle("Settings");
     fireEvent.click(settingsBtn);
 
@@ -386,12 +387,12 @@ describe("Navigation history integration", () => {
       expect(screen.getByTestId("settings-modal")).toBeTruthy();
     });
 
-    // On desktop, pushState should NOT be called for modal opens
-    expect(window.history.pushState).not.toHaveBeenCalled();
+    // Back-button nav is enabled on desktop too — pushState called for the modal open
+    expect((window.history.pushState as any).mock.calls.length).toBeGreaterThan(pushCallsBefore);
   });
 
-  // 2. Desktop: popstate does NOT dismiss modals
-  it("does not dismiss Settings modal on popstate in desktop mode", async () => {
+  // 2. Desktop: popstate dismisses modals
+  it("dismisses Settings modal on popstate in desktop mode", async () => {
     await renderAppAndWait();
 
     const settingsBtn = screen.getByTitle("Settings");
@@ -404,18 +405,21 @@ describe("Navigation history integration", () => {
     // Simulate back button
     dispatchPopState({ navIndex: 0 });
 
-    // Settings modal should still be open
-    expect(screen.getByTestId("settings-modal")).toBeTruthy();
+    // Settings modal should be dismissed
+    await waitFor(() => {
+      expect(screen.queryByTestId("settings-modal")).toBeNull();
+    });
   });
 
-  // 3. Desktop: view changes do NOT push history entries
-  it("does not push history entry for view changes on desktop", async () => {
+  // 3. Desktop: view changes push history entries
+  it("pushes history entry for view changes on desktop", async () => {
     localStorage.setItem("kb-dashboard-view-mode", "project");
     const taskViewStorageKey = scopedKey("kb-dashboard-task-view", DEFAULT_PROJECT_ID);
     localStorage.setItem(taskViewStorageKey, "board");
 
     await renderAppAndWait();
 
+    const pushCallsBefore = (window.history.pushState as any).mock.calls.length;
     // Switch to agents view
     const agentsTab = screen.queryByTitle("Agents");
     if (!agentsTab) return;
@@ -425,12 +429,12 @@ describe("Navigation history integration", () => {
       expect(screen.getByTestId("agents-view")).toBeTruthy();
     });
 
-    // pushState should NOT have been called for view changes on desktop
-    expect(window.history.pushState).not.toHaveBeenCalled();
+    // pushState should have been called for the view change
+    expect((window.history.pushState as any).mock.calls.length).toBeGreaterThan(pushCallsBefore);
   });
 
-  // 4. Desktop: popstate does NOT revert view changes
-  it("does not revert view change on popstate in desktop mode", async () => {
+  // 4. Desktop: popstate reverts view changes
+  it("reverts view change on popstate in desktop mode", async () => {
     localStorage.setItem("kb-dashboard-view-mode", "project");
     const taskViewStorageKey = scopedKey("kb-dashboard-task-view", DEFAULT_PROJECT_ID);
     localStorage.setItem(taskViewStorageKey, "board");
@@ -448,8 +452,10 @@ describe("Navigation history integration", () => {
     // Simulate back button
     dispatchPopState({ navIndex: 0 });
 
-    // Agents view should still be showing (desktop ignores popstate for navigation)
-    expect(screen.getByTestId("agents-view")).toBeTruthy();
+    // Agents view should be reverted (board view shown instead)
+    await waitFor(() => {
+      expect(screen.queryByTestId("agents-view")).toBeNull();
+    });
   });
 
   // 5. Verify useNavigationHistory is called with enabled=true on mobile

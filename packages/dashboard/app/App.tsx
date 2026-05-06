@@ -229,8 +229,8 @@ function AppInner() {
   const viewportMode = useViewportMode();
   const isMobile = viewportMode === "mobile";
 
-  // Navigation history for mobile back button / iOS swipe-back.
-  const { pushNav, replaceCurrent } = useNavigationHistory({ enabled: isMobile });
+  // Navigation history for browser back button (desktop + mobile).
+  const { pushNav, replaceCurrent } = useNavigationHistory({ enabled: true });
 
   // View state must be defined before useTasks since useTasks depends on taskView for SSE gating
   const { viewMode, setViewMode, taskView, handleChangeTaskView } = useViewState({
@@ -247,7 +247,7 @@ function AppInner() {
 
   const { views: pluginDashboardViews } = usePluginDashboardViews(currentProject?.id);
 
-  // History-aware view change handler — pushes nav entry on mobile.
+  // History-aware view change handler — pushes nav entry on back-navigation stack.
   const handleTaskViewChange = useCallback((newView: TaskView) => {
     if (newView === "missions") {
       setMissionResumeSessionId(undefined);
@@ -256,7 +256,6 @@ function AppInner() {
     }
     const previousView = taskView;
     handleChangeTaskView(newView);
-    // pushNav reads enabledRef internally; isMobile not needed in deps.
     if (previousView !== newView) {
       pushNav({ type: "view", revert: () => handleChangeTaskView(previousView) });
     }
@@ -500,7 +499,7 @@ function AppInner() {
   const {
     handleSelectProject,
     handleViewAllProjects,
-    handleOpenSettings,
+    handleOpenSettings: _handleOpenSettings,
     handleAddProject,
     handleSetupComplete,
     handleModelOnboardingComplete,
@@ -616,13 +615,13 @@ function AppInner() {
     [workflowSteps],
   );
 
-  const handleOpenNodes = useCallback(() => {
+  const _handleOpenNodes = useCallback(() => {
     if (!nodesEnabled) return;
     setNodesOpen((prev) => !prev);
   }, [nodesEnabled]);
 
   // History-aware nodes toggle — pushes nav entry only when opening
-  const handleOpenNodesWithHistory = useCallback(() => {
+  const handleOpenNodesWithNav = useCallback(() => {
     if (!nodesEnabled) return;
     if (!nodesOpen) {
       setNodesOpen(true);
@@ -632,50 +631,48 @@ function AppInner() {
     }
   }, [nodesEnabled, nodesOpen, pushNav]);
 
-  // History-aware modal open handlers — push nav entries on mobile only.
-  // Desktop (isMobile=false): pushNav/replaceCurrent are no-ops.
-  const openDetailTaskWithHistory = useCallback((task: Task | TaskDetail, tab?: Parameters<typeof modalManager.openDetailTask>[1], opts?: { origin?: DetailTaskOrigin }) => {
+  // History-aware modal open handlers — push nav entries for back-navigation.
+  const openDetailTask = useCallback((task: Task | TaskDetail, tab?: Parameters<typeof modalManager.openDetailTask>[1], opts?: { origin?: DetailTaskOrigin }) => {
     modalManager.openDetailTask(task, tab, opts);
     pushNav({ type: "modal", close: modalManager.closeDetailTask });
   }, [modalManager, pushNav]);
 
-  const openSettingsWithHistory = useCallback((section?: Parameters<typeof modalManager.openSettings>[0]) => {
+  const openSettingsWithNav = useCallback((section?: Parameters<typeof modalManager.openSettings>[0]) => {
     modalManager.openSettings(section);
     pushNav({ type: "modal", close: handleSettingsClose });
   }, [modalManager, pushNav, handleSettingsClose]);
 
-  const openNewTaskWithHistory = useCallback(() => {
+  const openNewTaskWithNav = useCallback(() => {
     modalManager.openNewTask();
     pushNav({ type: "modal", close: modalManager.closeNewTask });
   }, [modalManager, pushNav]);
 
-  const openPlanningWithHistory = useCallback(() => {
+  const openPlanningWithNav = useCallback(() => {
     modalManager.openPlanning();
     pushNav({ type: "modal", close: modalManager.closePlanning });
   }, [modalManager, pushNav]);
 
-  const openPlanningWithInitialPlanWithHistory = useCallback((initialPlan: string) => {
+  const openPlanningWithInitialPlanWithNav = useCallback((initialPlan: string) => {
     modalManager.openPlanningWithInitialPlan(initialPlan);
     pushNav({ type: "modal", close: modalManager.closePlanning });
   }, [modalManager, pushNav]);
 
-  const resumePlanningWithHistory = useCallback(() => {
+  const resumePlanningWithNav = useCallback(() => {
     modalManager.resumePlanning();
     pushNav({ type: "modal", close: modalManager.closePlanning });
   }, [modalManager, pushNav]);
 
-  const openSubtaskBreakdownWithHistory = useCallback((description: string) => {
+  const openSubtaskBreakdownWithNav = useCallback((description: string) => {
     modalManager.openSubtaskBreakdown(description);
     pushNav({ type: "modal", close: modalManager.closeSubtask });
   }, [modalManager, pushNav]);
 
-  const openGitHubImportWithHistory = useCallback(() => {
+  const openGitHubImportWithNav = useCallback(() => {
     modalManager.openGitHubImport();
     pushNav({ type: "modal", close: modalManager.closeGitHubImport });
   }, [modalManager, pushNav]);
 
-  const toggleTerminalWithHistory = useCallback(() => {
-    // Only push if terminal is currently closed (opening)
+  const toggleTerminalWithNav = useCallback(() => {
     if (!modalManager.terminalOpen) {
       modalManager.toggleTerminal();
       pushNav({ type: "modal", close: modalManager.closeTerminal });
@@ -684,59 +681,59 @@ function AppInner() {
     }
   }, [modalManager, pushNav]);
 
-  const openFilesWithHistory = useCallback(() => {
+  const openFilesWithNav = useCallback(() => {
     modalManager.openFiles();
     pushNav({ type: "modal", close: modalManager.closeFiles });
   }, [modalManager, pushNav]);
 
-  const openTodosWithHistory = useCallback(() => {
+  const openTodosWithNav = useCallback(() => {
     modalManager.openTodos();
     pushNav({ type: "modal", close: modalManager.closeTodos });
   }, [modalManager, pushNav]);
 
-  const openActivityLogWithHistory = useCallback(() => {
+  const openActivityLogWithNav = useCallback(() => {
     modalManager.openActivityLog();
     pushNav({ type: "modal", close: modalManager.closeActivityLog });
   }, [modalManager, pushNav]);
 
-  const openGitManagerWithHistory = useCallback(() => {
+  const openGitManagerWithNav = useCallback(() => {
     modalManager.openGitManager();
     pushNav({ type: "modal", close: modalManager.closeGitManager });
   }, [modalManager, pushNav]);
 
-  const openSystemStatsWithHistory = useCallback(() => {
+  const openSystemStatsWithNav = useCallback(() => {
     modalManager.openSystemStats();
     pushNav({ type: "modal", close: modalManager.closeSystemStats });
   }, [modalManager, pushNav]);
 
-  const openSchedulesWithHistory = useCallback(() => {
+  const openSchedulesWithNav = useCallback(() => {
     modalManager.openSchedules();
     pushNav({ type: "modal", close: modalManager.closeSchedules });
   }, [modalManager, pushNav]);
 
-  const openScriptsWithHistory = useCallback(() => {
+  const openScriptsWithNav = useCallback(() => {
     modalManager.openScripts();
     pushNav({ type: "modal", close: modalManager.closeScripts });
   }, [modalManager, pushNav]);
 
-  const openWorkflowStepsWithHistory = useCallback(() => {
+  const openWorkflowStepsWithNav = useCallback(() => {
     modalManager.openWorkflowSteps();
     pushNav({ type: "modal", close: modalManager.closeWorkflowSteps });
   }, [modalManager, pushNav]);
 
-  const openUsageWithHistory = useCallback((anchorRect?: DOMRect | null) => {
+  const openUsageWithNav = useCallback((anchorRect?: DOMRect | null) => {
     modalManager.openUsage(anchorRect);
     pushNav({ type: "modal", close: modalManager.closeUsage });
   }, [modalManager, pushNav]);
 
   // Modal-to-modal transition: scripts -> terminal uses replaceCurrent
-  const runScriptWithHistory = useCallback(async (name: string, command: string) => {
+  const runScriptWithNav = useCallback(async (name: string, command: string) => {
     await modalManager.runScript(name, command);
     replaceCurrent({ type: "modal", close: modalManager.closeTerminal });
   }, [modalManager, replaceCurrent]);
 
   // Modal-to-modal transition: settings -> onboarding uses replaceCurrent
-  const reopenOnboardingWithHistory = useCallback(() => {
+  const reopenOnboardingWithNav = useCallback(() => {
     modalManager.closeSettings();
     modalManager.openModelOnboarding();
     replaceCurrent({ type: "modal", close: modalManager.closeModelOnboarding });
@@ -887,7 +884,7 @@ function AppInner() {
                 <TaskCard
                   task={task}
                   projectId={currentProject?.id}
-                  onOpenDetail={isMobile ? (value: Task | TaskDetail) => openDetailTaskWithHistory(value) : (value: Task | TaskDetail) => modalManager.openDetailTask(value)}
+                  onOpenDetail={(value: Task | TaskDetail) => openDetailTask(value)}
                   addToast={addToast}
                   workflowStepNameLookup={workflowStepNameLookup}
                 />
@@ -966,7 +963,7 @@ function AppInner() {
             projectId={currentProject?.id}
             onSelectTask={(taskId) => {
               const task = tasks.find((t) => t.id === taskId);
-              if (task) (isMobile ? openDetailTaskWithHistory : modalManager.openDetailTask)(task as TaskDetail);
+              if (task) openDetailTask(task as TaskDetail);
             }}
             availableTasks={tasks.map((t) => ({ id: t.id, title: t.title }))}
             resumeSessionId={missionResumeSessionId}
@@ -1000,7 +997,7 @@ function AppInner() {
             <DocumentsView
               projectId={currentProject?.id}
               addToast={addToast}
-              onOpenDetail={isMobile ? openDetailTaskWithHistory : modalManager.openDetailTask}
+              onOpenDetail={openDetailTask}
             />
           </Suspense>
         </PageErrorBoundary>
@@ -1088,12 +1085,12 @@ function AppInner() {
             maxConcurrent={maxConcurrent}
             onMoveTask={moveTask}
             onPauseTask={pauseTask}
-            onOpenDetail={isMobile ? openDetailTaskWithHistory : modalManager.openDetailTask}
+            onOpenDetail={openDetailTask}
             addToast={addToast}
             onQuickCreate={handleBoardQuickCreate}
-            onNewTask={isMobile ? openNewTaskWithHistory : modalManager.openNewTask}
-            onPlanningMode={isMobile ? openPlanningWithInitialPlanWithHistory : modalManager.openPlanningWithInitialPlan}
-            onSubtaskBreakdown={isMobile ? openSubtaskBreakdownWithHistory : modalManager.openSubtaskBreakdown}
+            onNewTask={openNewTaskWithNav}
+            onPlanningMode={openPlanningWithInitialPlanWithNav}
+            onSubtaskBreakdown={openSubtaskBreakdownWithNav}
             autoMerge={autoMerge}
             onToggleAutoMerge={toggleAutoMerge}
             globalPaused={globalPaused}
@@ -1131,13 +1128,13 @@ function AppInner() {
           onMergeTask={mergeTask}
           onResetTask={resetTask}
           onDuplicateTask={duplicateTask}
-          onOpenDetail={isMobile ? (task, options) => openDetailTaskWithHistory(task, undefined, options) : (task, options) => modalManager.openDetailTask(task, undefined, options)}
+          onOpenDetail={(task, options) => openDetailTask(task, undefined, options)}
           addToast={addToast}
           globalPaused={globalPaused}
-          onNewTask={isMobile ? openNewTaskWithHistory : modalManager.openNewTask}
+          onNewTask={openNewTaskWithNav}
           onQuickCreate={handleBoardQuickCreate}
-          onPlanningMode={isMobile ? openPlanningWithInitialPlanWithHistory : modalManager.openPlanningWithInitialPlan}
-          onSubtaskBreakdown={isMobile ? openSubtaskBreakdownWithHistory : modalManager.openSubtaskBreakdown}
+          onPlanningMode={openPlanningWithInitialPlanWithNav}
+          onSubtaskBreakdown={openSubtaskBreakdownWithNav}
           availableModels={availableModels}
           favoriteProviders={favoriteProviders}
           favoriteModels={favoriteModels}
@@ -1172,27 +1169,27 @@ function AppInner() {
     <>
       <Header
         isElectron={isElectron}
-        onOpenSettings={isMobile ? openSettingsWithHistory : handleOpenSettings}
-        onOpenGitHubImport={isMobile ? openGitHubImportWithHistory : modalManager.openGitHubImport}
-        onOpenPlanning={isMobile ? openPlanningWithHistory : modalManager.openPlanning}
-        onResumePlanning={isMobile ? resumePlanningWithHistory : modalManager.resumePlanning}
+        onOpenSettings={openSettingsWithNav}
+        onOpenGitHubImport={openGitHubImportWithNav}
+        onOpenPlanning={openPlanningWithNav}
+        onResumePlanning={resumePlanningWithNav}
         activePlanningSessionCount={bgPlanningSessions.length}
-        onOpenUsage={isMobile ? openUsageWithHistory : modalManager.openUsage}
-        onOpenActivityLog={isMobile ? openActivityLogWithHistory : modalManager.openActivityLog}
-        onOpenSystemStats={isMobile ? openSystemStatsWithHistory : modalManager.openSystemStats}
+        onOpenUsage={openUsageWithNav}
+        onOpenActivityLog={openActivityLogWithNav}
+        onOpenSystemStats={openSystemStatsWithNav}
         onOpenMailbox={() => handleTaskViewChange("mailbox")}
         mailboxUnreadCount={mailboxUnreadCount}
-        onOpenSchedules={isMobile ? openSchedulesWithHistory : modalManager.openSchedules}
-        onOpenGitManager={isMobile ? openGitManagerWithHistory : modalManager.openGitManager}
-        onOpenNodes={isMobile ? handleOpenNodesWithHistory : handleOpenNodes}
+        onOpenSchedules={openSchedulesWithNav}
+        onOpenGitManager={openGitManagerWithNav}
+        onOpenNodes={handleOpenNodesWithNav}
         showNodesButton={nodesEnabled}
-        onOpenWorkflowSteps={isMobile ? openWorkflowStepsWithHistory : modalManager.openWorkflowSteps}
-        onOpenScripts={isMobile ? openScriptsWithHistory : modalManager.openScripts}
-        onRunScript={isMobile ? runScriptWithHistory : modalManager.runScript}
-        onToggleTerminal={isMobile ? toggleTerminalWithHistory : modalManager.toggleTerminal}
-        onOpenFiles={isMobile ? openFilesWithHistory : modalManager.openFiles}
+        onOpenWorkflowSteps={openWorkflowStepsWithNav}
+        onOpenScripts={openScriptsWithNav}
+        onRunScript={runScriptWithNav}
+        onToggleTerminal={toggleTerminalWithNav}
+        onOpenFiles={openFilesWithNav}
         filesOpen={modalManager.filesOpen}
-        onOpenTodos={isMobile ? openTodosWithHistory : modalManager.openTodos}
+        onOpenTodos={openTodosWithNav}
         todosOpen={modalManager.todosOpen}
         todosEnabled={todosEnabled}
         globalPaused={globalPaused}
@@ -1297,27 +1294,27 @@ function AppInner() {
         footerVisible={viewMode === "project" && !!currentProject}
         modalOpen={modalManager.anyModalOpen}
         keyboardOpen={mobileKeyboardOpen}
-        onOpenSettings={isMobile ? openSettingsWithHistory : handleOpenSettings}
-        onOpenActivityLog={isMobile ? openActivityLogWithHistory : modalManager.openActivityLog}
-        onOpenSystemStats={isMobile ? openSystemStatsWithHistory : modalManager.openSystemStats}
+        onOpenSettings={openSettingsWithNav}
+        onOpenActivityLog={openActivityLogWithNav}
+        onOpenSystemStats={openSystemStatsWithNav}
         onOpenMailbox={() => handleTaskViewChange("mailbox")}
-        onOpenNodes={isMobile ? handleOpenNodesWithHistory : handleOpenNodes}
+        onOpenNodes={handleOpenNodesWithNav}
         mailboxUnreadCount={mailboxUnreadCount}
-        onOpenGitManager={isMobile ? openGitManagerWithHistory : modalManager.openGitManager}
-        onOpenWorkflowSteps={isMobile ? openWorkflowStepsWithHistory : modalManager.openWorkflowSteps}
-        onOpenSchedules={isMobile ? openSchedulesWithHistory : modalManager.openSchedules}
-        onOpenScripts={isMobile ? openScriptsWithHistory : modalManager.openScripts}
-        onToggleTerminal={isMobile ? toggleTerminalWithHistory : modalManager.toggleTerminal}
-        onOpenFiles={isMobile ? openFilesWithHistory : modalManager.openFiles}
-        onOpenTodos={isMobile ? openTodosWithHistory : modalManager.openTodos}
+        onOpenGitManager={openGitManagerWithNav}
+        onOpenWorkflowSteps={openWorkflowStepsWithNav}
+        onOpenSchedules={openSchedulesWithNav}
+        onOpenScripts={openScriptsWithNav}
+        onToggleTerminal={toggleTerminalWithNav}
+        onOpenFiles={openFilesWithNav}
+        onOpenTodos={openTodosWithNav}
         todosOpen={modalManager.todosOpen}
-        onOpenGitHubImport={isMobile ? openGitHubImportWithHistory : modalManager.openGitHubImport}
-        onOpenPlanning={isMobile ? openPlanningWithHistory : modalManager.openPlanning}
-        onResumePlanning={isMobile ? resumePlanningWithHistory : modalManager.resumePlanning}
+        onOpenGitHubImport={openGitHubImportWithNav}
+        onOpenPlanning={openPlanningWithNav}
+        onResumePlanning={resumePlanningWithNav}
         activePlanningSessionCount={bgPlanningSessions.length}
-        onOpenUsage={isMobile ? () => openUsageWithHistory(null) : () => modalManager.openUsage(null)}
+        onOpenUsage={() => openUsageWithNav(null)}
         onViewAllProjects={handleViewAllProjects}
-        onRunScript={isMobile ? runScriptWithHistory : modalManager.runScript}
+        onRunScript={runScriptWithNav}
         projectId={currentProject?.id}
         showSkillsTab={skillsEnabled}
         experimentalFeatures={{
@@ -1369,10 +1366,7 @@ function AppInner() {
         deepLink={{ handleDetailClose }}
         settings={{ prAuthAvailable, themeMode, colorTheme, dashboardFontScalePct, setThemeMode, setColorTheme, setDashboardFontScalePct }}
         onSettingsClose={handleSettingsClose}
-        onReopenOnboarding={isMobile ? reopenOnboardingWithHistory : () => {
-          modalManager.closeSettings();
-          modalManager.openModelOnboarding();
-        }}
+        onReopenOnboarding={reopenOnboardingWithNav}
       />
       <AuthTokenRecoveryDialog open={authTokenRecoveryOpen} />
       {shellApi && (

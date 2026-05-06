@@ -57,6 +57,7 @@ vi.mock("@fusion/core", async () => {
       self.getTask = mockTaskStoreGetTask;
       self.getSettings = vi.fn().mockImplementation(async () => structuredClone(mockTaskStoreSettings));
       self.getMissionStore = vi.fn().mockReturnValue({
+        listMissions: vi.fn().mockReturnValue([]),
         getMissionWithHierarchy: vi.fn().mockReturnValue(null),
         findNextPendingSlice: vi.fn().mockReturnValue(null),
         activateSlice: vi.fn(),

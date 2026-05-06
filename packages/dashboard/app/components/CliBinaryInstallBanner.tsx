@@ -103,14 +103,30 @@ export function CliBinaryInstallBanner({ onOpenSettings }: Props) {
   // disabled the install banner would be misleading.
   if (status.state === "skipped") return null;
 
+  const isMismatch = status.state === "version-mismatch";
+  const installedVersion = status.binary.version;
+  const targetVersion = status.expectedVersion;
+  const title = isMismatch ? "Update the Fusion CLI" : "Install the Fusion CLI";
+  const body = isMismatch ? (
+    <>
+      Your installed <code>fn</code>/<code>fusion</code> CLI is{" "}
+      <strong>v{installedVersion ?? "unknown"}</strong> but this dashboard expects{" "}
+      <strong>v{targetVersion}</strong>. Update to stay in sync.
+    </>
+  ) : (
+    <>
+      Get the <code>fn</code> and <code>fusion</code> commands on your terminal so you
+      can drive Fusion from anywhere. One click below or copy the command into your shell.
+    </>
+  );
+  const idleLabel = isMismatch ? "Update with npm" : "Install with npm";
+  const busyLabel = isMismatch ? "Updating…" : "Installing…";
+
   return (
     <div className="cli-binary-banner" role="status">
       <div className="cli-binary-banner__body">
-        <div className="cli-binary-banner__title">Install the Fusion CLI</div>
-        <div className="cli-binary-banner__text">
-          Get the <code>fn</code> and <code>fusion</code> commands on your terminal so you
-          can drive Fusion from anywhere. One click below or copy the command into your shell.
-        </div>
+        <div className="cli-binary-banner__title">{title}</div>
+        <div className="cli-binary-banner__text">{body}</div>
         <div className="cli-binary-banner__actions">
           <button
             type="button"
@@ -118,7 +134,7 @@ export function CliBinaryInstallBanner({ onOpenSettings }: Props) {
             onClick={() => void handleInstall()}
             disabled={installing}
           >
-            {installing ? "Installing…" : "Install with npm"}
+            {installing ? busyLabel : idleLabel}
           </button>
           <button
             type="button"

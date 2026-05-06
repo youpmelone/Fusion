@@ -76,6 +76,11 @@ const BUNDLED_PLUGINS: BundledPlugin[] = [
     path: "./plugins/fusion-plugin-droid-runtime",
     experimental: true,
   },
+  {
+    id: "fusion-plugin-dependency-graph",
+    name: "Dependency Graph",
+    path: "./plugins/fusion-plugin-dependency-graph",
+  },
 ];
 
 export const STATE_COLORS: Record<string, string> = {
