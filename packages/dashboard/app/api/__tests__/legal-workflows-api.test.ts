@@ -7,6 +7,7 @@ import {
   runCounterLawsuitPrototypeEvidenceLedger,
   runCounterLawsuitPrototypeResearchMemo,
   runCounterLawsuitPrototypeRedTeamReport,
+  runCounterLawsuitPrototypeLineageScoringLog,
   runCounterLawsuitPrototypeVaultMining,
   startCounterLawsuitPrototypeWorkflow,
   type StartCounterLawsuitPrototypeWorkflowInput,
@@ -47,6 +48,7 @@ describe("legal workflow API helpers", () => {
           claimMap: { runId: "LWR-1", status: "blocked", claimCount: 1, elementCount: 1, allegationCount: 0, supportingEvidenceCount: 0, missingProofCount: 1, unresolvedGapCount: 1, diagnostics: [], safetyNotice: "draft-only claim map" },
           draftComplaint: { runId: "LWR-1", status: "blocked", draftComplaintDocumentKey: "draft-counter-lawsuit-complaint", sectionCount: 10, paragraphCount: 0, claimDraftCount: 0, sourceReferenceCount: 0, sourcePathCount: 0, missingProofCount: 1, unresolvedGapCount: 1, diagnostics: [], safetyNotice: "draft-only complaint" },
           redTeamReport: { runId: "LWR-1", status: "blocked", redTeamReportDocumentKey: "red-team-report", statusDocumentKey: "red-team-report-status", findingCount: 1, mtdAttackCount: 1, citationIssueCount: 1, revisionRecommendationCount: 1, unresolvedBlockerCount: 1, reviewedParagraphCount: 0, reviewedClaimCount: 0, diagnostics: [], safetyNotice: "draft-only red-team report" },
+          lineageScoringLog: { runId: "LWR-1", status: "blocked", lineageScoringLogDocumentKey: "lineage-scoring-log", statusDocumentKey: "lineage-scoring-log-status", promptTraceCount: 2, searchTraceCount: 1, draftVersionCount: 3, critiqueScoreCount: 4, rejectedVariantCount: 1, promotionDecision: "not-promoted", unresolvedBlockerCount: 1, diagnostics: [], safetyNotice: "diagnostic only" },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -63,6 +65,8 @@ describe("legal workflow API helpers", () => {
     expect(response.draftComplaint?.status).toBe("blocked");
     expect(response.redTeamReport?.status).toBe("blocked");
     expect(response.redTeamReport?.redTeamReportDocumentKey).toBe("red-team-report");
+    expect(response.lineageScoringLog?.promotionDecision).toBe("not-promoted");
+    expect(response.lineageScoringLog?.lineageScoringLogDocumentKey).toBe("lineage-scoring-log");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs?projectId=proj%2Flegal%2Bworkflow");
@@ -95,6 +99,7 @@ describe("legal workflow API helpers", () => {
           claimMap: { runId: "CLW-1", status: "not-run", claimCount: 0, elementCount: 0, allegationCount: 0, supportingEvidenceCount: 0, missingProofCount: 0, unresolvedGapCount: 0, diagnostics: [], safetyNotice: "draft-only claim map" },
           draftComplaint: { runId: "CLW-1", status: "not-run", sectionCount: 0, paragraphCount: 0, claimDraftCount: 0, sourceReferenceCount: 0, sourcePathCount: 0, missingProofCount: 0, unresolvedGapCount: 0, diagnostics: [], safetyNotice: "draft-only complaint" },
           redTeamReport: { runId: "CLW-1", status: "not-run", findingCount: 0, mtdAttackCount: 0, citationIssueCount: 0, revisionRecommendationCount: 0, unresolvedBlockerCount: 0, reviewedParagraphCount: 0, reviewedClaimCount: 0, diagnostics: [], safetyNotice: "draft-only red-team report" },
+          lineageScoringLog: { runId: "CLW-1", status: "not-run", promptTraceCount: 0, searchTraceCount: 0, draftVersionCount: 0, critiqueScoreCount: 0, rejectedVariantCount: 0, promotionDecision: "not-promoted", unresolvedBlockerCount: 0, diagnostics: [], safetyNotice: "diagnostic only" },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -110,6 +115,7 @@ describe("legal workflow API helpers", () => {
     expect(response.claimMap?.status).toBe("not-run");
     expect(response.draftComplaint?.status).toBe("not-run");
     expect(response.redTeamReport?.status).toBe("not-run");
+    expect(response.lineageScoringLog?.status).toBe("not-run");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs/CLW%2F1?projectId=proj%2Flegal%2Bworkflow");
@@ -335,6 +341,41 @@ it("retries counter-lawsuit red-team report generation with project scoping", as
   expect(fetchMock).toHaveBeenCalledTimes(1);
   const [url, init] = fetchMock.mock.calls[0];
   expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs/CLW%2F1/red-team-report?projectId=proj%2Flegal%2Bworkflow");
+  expect(init?.method).toBe("POST");
+  expect(JSON.parse(String(init?.body))).toEqual({ force: true });
+});
+
+it("retries counter-lawsuit lineage/scoring log generation with project scoping", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        runId: "CLW-1",
+        status: "partial",
+        lineageScoringLogDocumentKey: "lineage-scoring-log",
+        statusDocumentKey: "lineage-scoring-log-status",
+        promptTraceCount: 3,
+        searchTraceCount: 2,
+        draftVersionCount: 4,
+        critiqueScoreCount: 4,
+        rejectedVariantCount: 2,
+        promotionDecision: "not-promoted",
+        unresolvedBlockerCount: 1,
+        diagnostics: [],
+        safetyNotice: "workflow diagnostics only and not filing-ready",
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ),
+  );
+
+  const response = await runCounterLawsuitPrototypeLineageScoringLog("CLW/1", { force: true }, "proj/legal+workflow");
+
+  expect(response.lineageScoringLogDocumentKey).toBe("lineage-scoring-log");
+  expect(response.promotionDecision).toBe("not-promoted");
+  expect(response.promptTraceCount).toBe(3);
+  expect(response.safetyNotice).toContain("not filing-ready");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const [url, init] = fetchMock.mock.calls[0];
+  expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs/CLW%2F1/lineage-scoring-log?projectId=proj%2Flegal%2Bworkflow");
   expect(init?.method).toBe("POST");
   expect(JSON.parse(String(init?.body))).toEqual({ force: true });
 });

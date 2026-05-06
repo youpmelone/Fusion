@@ -49,6 +49,14 @@ import {
   type RedTeamDiagnostic,
 } from "../legal-red-team-report.js";
 import {
+  LINEAGE_SCORING_LOG_DOCUMENT_KEY,
+  LINEAGE_SCORING_LOG_SAFETY_NOTICE,
+  deriveLineageScoringLogStatusForRun,
+  generateCounterLawsuitLineageScoringLog,
+  type CounterLawsuitLineageScoringLogResult,
+  type LineageDiagnostic,
+} from "../legal-lineage-scoring-log.js";
+import {
   COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY,
   COURTLISTENER_SAFETY_NOTICE,
   deriveAuthorityValidationStatusForRun,
@@ -177,6 +185,22 @@ export interface LegalWorkflowRedTeamReportSummary {
   reviewedParagraphCount: number;
   reviewedClaimCount: number;
   diagnostics: RedTeamDiagnostic[];
+  safetyNotice: string;
+}
+
+export interface LegalWorkflowLineageScoringLogSummary {
+  runId: string;
+  status: CounterLawsuitLineageScoringLogResult["status"];
+  lineageScoringLogDocumentKey?: string;
+  statusDocumentKey?: string;
+  promptTraceCount: number;
+  searchTraceCount: number;
+  draftVersionCount: number;
+  critiqueScoreCount: number;
+  rejectedVariantCount: number;
+  promotionDecision: "not-promoted";
+  unresolvedBlockerCount: number;
+  diagnostics: LineageDiagnostic[];
   safetyNotice: string;
 }
 
@@ -642,6 +666,66 @@ function validateRedTeamReportRetryPayload(body: unknown): { force?: boolean } {
   return validateForceOnlyPayload(body, "red-team report");
 }
 
+function lineageScoringLogFailureSummary(runId: string): LegalWorkflowLineageScoringLogSummary {
+  return {
+    runId,
+    status: "failed",
+    lineageScoringLogDocumentKey: LINEAGE_SCORING_LOG_DOCUMENT_KEY,
+    promptTraceCount: 0,
+    searchTraceCount: 0,
+    draftVersionCount: 0,
+    critiqueScoreCount: 0,
+    rejectedVariantCount: 0,
+    promotionDecision: "not-promoted",
+    unresolvedBlockerCount: 0,
+    diagnostics: [{
+      code: "lineage-scoring-log-route-failed",
+      severity: "error",
+      message: "Lineage/scoring log generation failed before a summary could be returned. The workflow run remains queued; retry the lineage-scoring-log endpoint after checking prerequisite documents.",
+      sourceDocumentKey: LINEAGE_SCORING_LOG_DOCUMENT_KEY,
+    }],
+    safetyNotice: LINEAGE_SCORING_LOG_SAFETY_NOTICE,
+  };
+}
+
+async function runLineageScoringLogForResponse(params: {
+  store: TaskStore;
+  runId: string;
+  force?: boolean;
+  deps: LegalWorkflowRouteDeps;
+}): Promise<LegalWorkflowLineageScoringLogSummary> {
+  try {
+    const result = await generateCounterLawsuitLineageScoringLog({
+      taskStore: params.store,
+      runId: params.runId,
+      force: params.force,
+      now: params.deps.now,
+    });
+    return {
+      runId: result.runId,
+      status: result.status,
+      lineageScoringLogDocumentKey: result.status === "not-run" ? undefined : result.lineageScoringLogDocumentKey,
+      statusDocumentKey: result.statusDocumentKey,
+      promptTraceCount: result.counts.promptTraces,
+      searchTraceCount: result.counts.searchTraces,
+      draftVersionCount: result.counts.draftVersions,
+      critiqueScoreCount: result.counts.critiqueScores,
+      rejectedVariantCount: result.counts.rejectedVariants,
+      promotionDecision: result.promotionRationale.decision,
+      unresolvedBlockerCount: result.counts.unresolvedBlockers,
+      diagnostics: result.diagnostics,
+      safetyNotice: result.safetyNotice,
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.statusCode === 404) throw error;
+    return lineageScoringLogFailureSummary(params.runId);
+  }
+}
+
+function validateLineageScoringLogRetryPayload(body: unknown): { force?: boolean } {
+  return validateForceOnlyPayload(body, "lineage/scoring log");
+}
+
 export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWorkflowRouteDeps = {}): void {
   const { router, getProjectContext, rethrowAsApiError } = ctx;
   const createAgentStore = deps.createAgentStore ?? defaultCreateAgentStore;
@@ -691,7 +775,12 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         runId: response.runId,
         deps,
       });
-      res.status(201).json({ ...response, vaultMining, authorityValidation, researchMemo, evidenceLedger, claimMap, draftComplaint, redTeamReport });
+      const lineageScoringLog = await runLineageScoringLogForResponse({
+        store: scopedStore,
+        runId: response.runId,
+        deps,
+      });
+      res.status(201).json({ ...response, vaultMining, authorityValidation, researchMemo, evidenceLedger, claimMap, draftComplaint, redTeamReport, lineageScoringLog });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;
@@ -868,6 +957,30 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
     }
   });
 
+  router.post("/legal-workflows/counter-lawsuit/runs/:runId/lineage-scoring-log", async (req, res) => {
+    try {
+      if (!req.params.runId?.trim()) throw badRequest("runId is required");
+      const { store: scopedStore } = await getProjectContext(req);
+      const request = validateLineageScoringLogRetryPayload(req.body);
+      await getCounterLawsuitWorkflowRunStatus({
+        taskStore: scopedStore,
+        runId: req.params.runId,
+      });
+      const lineageScoringLog = await runLineageScoringLogForResponse({
+        store: scopedStore,
+        runId: req.params.runId,
+        force: request.force,
+        deps,
+      });
+      res.json(lineageScoringLog);
+    } catch (error: unknown) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      rethrowAsApiError(error);
+    }
+  });
+
   router.get("/legal-workflows/counter-lawsuit/runs/:runId", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
@@ -903,7 +1016,11 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         taskStore: scopedStore,
         runId: req.params.runId,
       });
-      res.json({ ...status, vaultMining, authorityValidation, researchMemo, evidenceLedger, claimMap, draftComplaint, redTeamReport });
+      const lineageScoringLog = await deriveLineageScoringLogStatusForRun({
+        taskStore: scopedStore,
+        runId: req.params.runId,
+      });
+      res.json({ ...status, vaultMining, authorityValidation, researchMemo, evidenceLedger, claimMap, draftComplaint, redTeamReport, lineageScoringLog });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;

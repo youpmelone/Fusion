@@ -148,6 +148,21 @@ The response keeps the FN-001 dashboard contract and adds orchestration details:
     diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string; paragraphId?: string; claimDraftId?: string; findingId?: string }>;
     safetyNotice: string;
   };
+  lineageScoringLog: {
+    runId: string;
+    status: "completed" | "partial" | "blocked" | "failed" | "stale" | "not-run";
+    lineageScoringLogDocumentKey?: "lineage-scoring-log";
+    statusDocumentKey?: "lineage-scoring-log-status";
+    promptTraceCount: number;
+    searchTraceCount: number;
+    draftVersionCount: number;
+    critiqueScoreCount: number;
+    rejectedVariantCount: number;
+    promotionDecision: "not-promoted";
+    unresolvedBlockerCount: number;
+    diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string; sourceTaskId?: string; sourceDocumentKey?: string; workflowStage?: string }>;
+    safetyNotice: string;
+  };
 }
 ```
 
@@ -170,6 +185,12 @@ Complaint draft generation is best-effort during launch. A draft failure does no
 After draft complaint generation is attempted, Fusion generates the deterministic `red-team-report` task document on the opposing-counsel red-team stage task. The report is built only from persisted `draft-counter-lawsuit-complaint`, `draft-counter-lawsuit-complaint-status`, `claim-map`, and `claim-map-status` documents. API callers cannot submit report text, attack categories, defenses, legal theories, source paths, confidence scores, citation records, revision text, external commands, CourtListener tokens, headers, or raw fetch options from the request body.
 
 Red-team report generation is best-effort during launch. A report failure does not roll back the workflow run; the launch response returns `redTeamReport.status: "failed"`, `"blocked"`, `"partial"`, or `"stale"` with diagnostics, and the retry endpoint can regenerate from the persisted prerequisite documents. Older runs that predate the red-team stage return `redTeamReport.status: "not-run"`.
+
+After red-team report generation is attempted, Fusion generates the deterministic `lineage-scoring-log` task document on the lineage/scoring stage task.
+
+The log is built only from persisted stage tasks, `counter-lawsuit-run`, `counter-lawsuit-stage`, enabled prompt-mode workflow steps, current task documents, bounded task-document revisions, upstream manifests, and companion status documents. API callers cannot submit lineage text, critique scores, rejected variants, promotion rationale, legal arguments, source manifests, source paths, CourtListener records, MCP commands, external commands, tokens, headers, or raw fetch options from the request body.
+
+Lineage/scoring generation is best-effort during launch. A lineage failure does not roll back the workflow run; the launch response returns `lineageScoringLog.status: "failed"`, `"blocked"`, `"partial"`, or `"stale"` with diagnostics, and the retry endpoint can regenerate from persisted prerequisite documents. Older runs that predate the lineage/scoring stage return `lineageScoringLog.status: "not-run"` while preserving earlier artifact summaries.
 
 ## Vault-mining MCP setup
 
@@ -358,6 +379,35 @@ Red-team retry is deterministic and prerequisite-driven:
 - `failed` means report generation itself failed; diagnostics are redacted and bounded.
 - `completed` still means draft-only issue spotting, not legal advice, legal verification, good-law review, citation-format validation, attorney review, or filing readiness.
 
+## Lineage/scoring log retry API
+
+Generate or retry the lineage/scoring log for an existing run with:
+
+```http
+POST /api/legal-workflows/counter-lawsuit/runs/:runId/lineage-scoring-log
+```
+
+The request body accepts only:
+
+```ts
+{
+  force?: boolean;
+}
+```
+
+Unknown fields return `400`. Unknown run IDs return `404`.
+
+The response shape is the same `lineageScoringLog` summary returned by launch and status. `force: true` asks Fusion to regenerate from persisted workflow tasks, workflow-step prompts, upstream task documents, and companion status documents, but it still does not accept generated lineage text, scoring rows, promotion rationale, legal arguments, source paths, CourtListener records, external commands, tokens, headers, or raw fetch options from the request body.
+
+Lineage/scoring retry is deterministic and prerequisite-driven:
+
+- `blocked` means a required source document, task, manifest, or upstream status is missing, malformed, failed, or blocked in a way that prevents a complete lineage summary.
+- `partial` means Fusion wrote the log but malformed manifests, missing upstream artifacts, stale or non-completed status documents, unresolved source gaps, or human review requirements remain visible.
+- `stale` means a status document or upstream blocker says the primary log cannot be treated as current lineage diagnostics.
+- `failed` means generation or manifest parsing failed; diagnostics are redacted and bounded.
+- `not-run` means the run predates the lineage/scoring stage or the log has not been generated yet.
+- `completed` still means workflow diagnostics only, not legal advice, legal verification, good-law review, citation-format validation, attorney review, promotion, or filing readiness.
+
 ## Status API
 
 Fetch derived run status with:
@@ -366,7 +416,7 @@ Fetch derived run status with:
 GET /api/legal-workflows/counter-lawsuit/runs/:runId
 ```
 
-The status endpoint finds tasks whose `sourceMetadata.workflowRunId` matches the run ID. It returns the stage task statuses, artifact keys, safety gates, source scope status, lineage document references, the current vault-mining summary, the current CourtListener authority-validation summary, the current research memo summary, the current evidence ledger summary, the current claim-map summary, the current draft complaint summary, and the current red-team report summary.
+The status endpoint finds tasks whose `sourceMetadata.workflowRunId` matches the run ID. It returns the stage task statuses, artifact keys, safety gates, source scope status, lineage document references, the current vault-mining summary, the current CourtListener authority-validation summary, the current research memo summary, the current evidence ledger summary, the current claim-map summary, the current draft complaint summary, the current red-team report summary, and the current `lineageScoringLog` summary.
 
 The `authorityValidation` status includes the research run ID, candidate count, matched count, unmatched/ambiguous/unavailable count, diagnostics, safety notice, and document key references for `courtlistener-authority-validation` and `courtlistener-status` when present.
 
@@ -379,6 +429,8 @@ The `claimMap` status includes status, claim-map document key, status document k
 The `draftComplaint` status includes status, draft complaint document key, status document key when present, section count, numbered paragraph count, claim-draft count, source-reference count, source-path count, missing-proof count, unresolved gap count, diagnostics, and safety notice. If `draft-counter-lawsuit-complaint-status` reports blocked, partial, failed, stale, or unresolved prerequisites, status preserves that blocker instead of treating a stale primary complaint document as completed support. Older runs without a draft-complaint stage return `draftComplaint.status: "not-run"` while preserving earlier summaries.
 
 The `redTeamReport` status includes status, red-team report document key, status document key when present, finding count, candidate MTD attack count, citation/source issue count, revision recommendation count, unresolved blocker count, reviewed paragraph count, reviewed claim count, diagnostics, and safety notice. If `red-team-report-status` reports blocked, partial, failed, stale, or unresolved prerequisites, status preserves that blocker instead of treating a stale primary report as completed critique. Older runs without a red-team stage return `redTeamReport.status: "not-run"` while preserving earlier summaries.
+
+The `lineageScoringLog` status includes status, lineage/scoring log document key, status document key when present, prompt trace count, search trace count, draft-version count, critique-score count, rejected-variant count, promotion decision, unresolved blocker count, diagnostics, and safety notice. If `lineage-scoring-log-status` reports blocked, partial, failed, stale, or unresolved prerequisites, status preserves that status document instead of treating a stale primary lineage log as completed diagnostics. Older runs without a lineage/scoring stage return `lineageScoringLog.status: "not-run"` while preserving earlier summaries. A malformed primary lineage manifest returns parse diagnostics and is never treated as completed by default.
 
 Unknown run IDs return `404`.
 
@@ -413,7 +465,9 @@ After claim-map generation runs, the claim-map task receives `claim-map`. When g
 
 After draft complaint generation runs, the draft-complaint task receives `draft-counter-lawsuit-complaint`. Fusion always rewrites this primary document when generation is attempted, even when blocked, so stale complaint text cannot be mistaken for current support. When generation is blocked, partial, failed, or stale because of `claim-map-status`, Fusion also writes `draft-counter-lawsuit-complaint-status`. FN-015 opposing-counsel red-team work should use these documents as its prerequisite input and treat any status blockers, missing-proof entries, red-team-pending marker, unresolved authorities, missing source paths, or human verification requirements as unresolved drafting risk, not as support.
 
-After red-team report generation runs, the red-team stage task receives `red-team-report`. Fusion always rewrites this primary document when generation is attempted, even when blocked, so stale red-team critique cannot be mistaken for current support. When generation is blocked, partial, failed, or stale because of `draft-counter-lawsuit-complaint-status` or `claim-map-status`, Fusion also writes `red-team-report-status`. FN-010 lineage/scoring work should read both documents, preserve unsupported findings, unlinked MTD risk rows, citation issue rows, revision recommendations, unresolved blockers, and status limitations, and avoid treating the report as reliable, filing-ready, promoted, or attorney verified.
+After red-team report generation runs, the red-team stage task receives `red-team-report`. Fusion always rewrites this primary document when generation is attempted, even when blocked, so stale red-team critique cannot be mistaken for current support. When generation is blocked, partial, failed, or stale because of `draft-counter-lawsuit-complaint-status` or `claim-map-status`, Fusion also writes `red-team-report-status`.
+
+After lineage/scoring generation runs, the lineage/scoring stage task receives `lineage-scoring-log`. Fusion writes this primary document when generation is attempted so reviewers can inspect the current trace even when upstream blockers remain. When generation is blocked, partial, failed, or stale because upstream documents, manifests, or status documents are incomplete, Fusion also writes `lineage-scoring-log-status`. Status documents take precedence over stale primary lineage logs, and malformed primary manifests surface diagnostics instead of defaulting to completed.
 
 ## Vault-mining receipt schema
 
@@ -708,7 +762,72 @@ The red-team report is draft-only and source-linked only. It is not legal advice
 
 Raw MCP payloads, full note bodies, CourtListener raw payloads, authorization headers, API tokens, token-like provider errors, and unbounded source text are not persisted in the red-team report, report status, metadata, or API responses.
 
-FN-010 is the downstream handoff for lineage/scoring. It should read `red-team-report` and `red-team-report-status`, preserve unresolved blockers and limitations, and must not treat any red-team finding, MTD row, citation issue, or recommendation as reliable support, filing readiness, human verification, or promoted output.
+## Lineage/scoring log document schema
+
+The `lineage-scoring-log` task document contains Markdown for review plus a safe JSON manifest. The Markdown lists the safety boundary, run context, stage lineage, source document table, counts, diagnostics, and the embedded manifest.
+
+The safe manifest uses this shape:
+
+```ts
+{
+  runId: string;
+  generatedAt: string;
+  status: "completed" | "partial" | "blocked" | "failed" | "stale" | "not-run";
+  lineageTaskId?: string;
+  lineageScoringLogDocumentKey: "lineage-scoring-log";
+  statusDocumentKey?: "lineage-scoring-log-status";
+  stageTraces: Array<{ taskId: string; workflowStage: string; stageIndex: number; documentKey?: string; status: string; dependencyIds: string[]; sourceMetadata: Record<string, unknown> }>;
+  sourceDocuments: Array<{ traceId: string; taskId: string; workflowStage?: string; documentKey: string; present: boolean; parsedFrom: "metadata" | "json-block" | "missing" | "malformed"; status?: string; revision?: number; author?: string; createdAt?: string; updatedAt?: string; contentHash?: string; metadataSummary?: Record<string, unknown>; excerpt?: string; revisionCount: number }>;
+  promptTraces: Array<{ traceId: string; sourceType: "stage-task" | "stage-document" | "run-document" | "workflow-step"; taskId?: string; workflowStage?: string; documentKey?: string; workflowStepId?: string; workflowStepName?: string; contentHash: string; excerpt: string; safetyGateRefs: string[] }>;
+  searchTraces: Array<{ traceId: string; sourceTaskId?: string; sourceDocumentKey?: string; workflowStage?: string; query?: string; sourceSystem?: string; providerName?: string; toolName?: string; sourcePath?: string; receiptIds: string[]; authorityRecordIds: string[]; contentHash?: string }>;
+  draftVersions: Array<{ versionId: string; taskId: string; workflowStage?: string; documentKey: string; revision: number; current: boolean; author?: string; createdAt?: string; updatedAt?: string; contentHash: string; parsedFrom: "metadata" | "json-block" | "missing" | "malformed"; status?: string; excerpt?: string }>;
+  critiqueScores: Array<{ scoreId: string; label: string; value: number; maxValue: number; sourceTaskIds: string[]; sourceDocumentKeys: string[]; diagnosticCodes: string[]; explanation: string }>;
+  rejectedVariants: Array<{ variantId: string; sourceTaskId?: string; sourceDocumentKey?: string; workflowStage?: string; revision?: number; reason: string; preserved: true }>;
+  promotionRationale: { decision: "not-promoted"; reasons: string[]; requiredHumanReview: string[]; unresolvedBlockers: string[]; safetyNotice: string };
+  diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string; sourceTaskId?: string; sourceDocumentKey?: string; workflowStage?: string }>;
+  counts: { stageTasks: number; sourceDocuments: number; promptTraces: number; searchTraces: number; draftVersions: number; critiqueScores: number; rejectedVariants: number; diagnostics: number; unresolvedBlockers: number };
+  safetyNotice: string;
+}
+```
+
+The manifest maps lineage rows back to upstream identifiers when they are available in safe persisted artifacts: task IDs, document keys, revision numbers, content hashes, source paths, receipt IDs, authority record IDs, red-team finding IDs, MTD attack IDs, citation issue IDs, revision recommendation IDs, and status document keys. Missing upstream IDs remain diagnostics or empty arrays; Fusion does not invent identifiers to make a lineage row look complete.
+
+Prompt traces come only from safe persisted prompts: stage task titles and descriptions, `counter-lawsuit-run`, `counter-lawsuit-stage`, and enabled prompt-mode workflow steps. Each prompt trace stores a bounded redacted excerpt, a content hash, task or workflow-step IDs when available, document keys when available, workflow stage, and safety-gate references.
+
+Search traces come only from persisted manifests such as `vault-mining-receipts`, `research-memo.searches`, receipt and evidence rows, source links, and CourtListener authority record references. They preserve query text only in bounded redacted form, source systems, provider/tool names, source paths, receipt IDs, authority record IDs, and hashes. They do not persist raw MCP payloads, full note bodies, raw CourtListener payloads, headers, tokens, provider secrets, or unbounded source text.
+
+Draft-version rows preserve current task documents and bounded prior `TaskDocumentRevision` rows for `research-memo`, `evidence-ledger`, `claim-map`, `draft-counter-lawsuit-complaint`, `red-team-report`, and their status documents. Prior revisions and superseded variants are preserved as lineage records or rejected variants; the lineage log does not delete draft history or promote an earlier draft.
+
+Critique-score rows are workflow diagnostics that link back to source task IDs, document keys, diagnostic codes, and explanations. Scores are not legal reliability scores, citation validation, good-law validation, attorney review, or filing approval. Implementations may emit zero score rows when no safe persisted scoring inputs exist; the count is still explicit in the manifest and API summary.
+
+Rejected variants preserve prior revisions, unsupported or superseded draft fragments, malformed manifests, blocked status documents, red-team recommendations to narrow or remove unsupported text, and other upstream rows that explain why a newer draft replaced an older one. Each rejected variant remains preserved for review and is not promoted.
+
+`promotionRationale.decision` is always `"not-promoted"` in this prototype. The rationale lists required qualified legal review, source and receipt review, citation-format review, good-law validation, filing-readiness review, unresolved blockers, and the safety notice. It must not describe any generated artifact, score, source, authority, draft, red-team finding, rejected variant, or rationale as legally verified, human verified, good-law checked, citation-format validated, promoted, reliable, or filing-ready.
+
+The `lineage-scoring-log-status` document is written for blocked, partial, failed, or stale states. Its metadata and embedded JSON use this bounded status shape:
+
+```ts
+{
+  runId: string;
+  status: "completed" | "partial" | "blocked" | "failed" | "stale";
+  lineageScoringLogDocumentKey: "lineage-scoring-log";
+  statusDocumentKey: "lineage-scoring-log-status";
+  promptTraceCount: number;
+  searchTraceCount: number;
+  draftVersionCount: number;
+  critiqueScoreCount: number;
+  rejectedVariantCount: number;
+  promotionDecision: "not-promoted";
+  unresolvedBlockerCount: number;
+  diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string; sourceTaskId?: string; sourceDocumentKey?: string; workflowStage?: string }>;
+  counts: Record<string, number>;
+  safetyNotice: string;
+}
+```
+
+Status derivation is conservative. A non-completed `lineage-scoring-log-status` document takes precedence over a stale primary log. A run without a lineage/scoring stage returns `lineageScoringLog.status: "not-run"` for backward compatibility. A missing primary document returns `not-run` with a diagnostic. A malformed primary lineage manifest returns parse diagnostics and failed or partial status; it never defaults to completed.
+
+FN-011 full-run verification must consume the landed constants and contracts from this task. It should use the canonical document key `lineage-scoring-log`, the companion status key `lineage-scoring-log-status`, the retry route `POST /api/legal-workflows/counter-lawsuit/runs/:runId/lineage-scoring-log`, and the launch/status field `lineageScoringLog` instead of inventing a substitute lineage behavior.
 
 ## Agents and Codex legal skills
 
@@ -730,6 +849,8 @@ It requires `REQUEST REVISION` when an authority is used as support without a ma
 
 The opposing-counsel red-team prompt requires `red-team-report` to attack `draft-counter-lawsuit-complaint` before passing. It checks `draft-counter-lawsuit-complaint-status` and `red-team-report-status` for unresolved blockers, and it requires pleading weaknesses, candidate MTD attack rows, citation/source issue rows, unresolved blockers, placeholder pleading field risks, and conservative revision recommendations. It prevents downstream completion from treating the draft complaint or red-team report as promoted, reliable, verified, good-law checked, citation-format validated, human verified, legal advice, or filing-ready.
 
+The lineage preservation prompt requires `lineage-scoring-log` before passing the lineage/scoring stage. It checks prompt traces, search traces, draft versions, critique scores, rejected variants, promotion rationale, upstream task IDs, artifact document keys, source receipts, authority record IDs, red-team finding IDs, MTD attack IDs, citation issue IDs, revision recommendation IDs, status documents, unresolved blockers, and the absence of promoted, reliable, verified, good-law checked, citation-format validated, human verified, legal advice, or filing-ready language.
+
 ## Optional source scope behavior
 
 A launch can omit source scope and source query.
@@ -740,8 +861,8 @@ When no `vaultScope`, `sourceScope`, or `sourceQuery` is supplied, the run recor
 
 ## Integration boundaries
 
-This workflow now mines QMD MCP and Obsidian MCP for source-linked local receipts, uses CourtListener for bounded authority lookup when candidates are available, generates a source-linked draft research memo from those persisted manifests, generates a structured evidence ledger from the persisted memo documents, generates a structured claim map from the persisted evidence ledger documents, generates a deterministic draft complaint scaffold from the persisted claim-map documents, and generates an opposing-counsel red-team report from persisted complaint and claim-map documents.
+This workflow now mines QMD MCP and Obsidian MCP for source-linked local receipts, uses CourtListener for bounded authority lookup when candidates are available, generates a source-linked draft research memo from those persisted manifests, generates a structured evidence ledger from the persisted memo documents, generates a structured claim map from the persisted evidence ledger documents, generates a deterministic draft complaint scaffold from the persisted claim-map documents, generates an opposing-counsel red-team report from persisted complaint and claim-map documents, and generates a lineage/scoring log from persisted workflow tasks, documents, revisions, workflow-step prompts, and status documents.
 
 CourtListener can confirm that a citation or query maps to a CourtListener record or candidate match. It does not Shepardize, determine good-law status, verify legal conclusions, check final filing citation format, decide filing readiness, generate filings, or replace attorney judgment.
 
-Stage prompts instruct agents to use integrations when available and to mark unavailable integration results as unverified. Outputs, mined receipts, authority-validation records, generated research memos, generated evidence ledgers, generated claim maps, generated complaint drafts, and generated red-team reports are drafts or source manifests only. They are source-linked only, not legal advice, not verified facts, not verified fact support, not good-law verification, not citation-format validation, not filing-ready, not human verification, not promoted for filing, and not reliable support. FN-010 remains the downstream handoff for lineage/scoring work.
+Stage prompts instruct agents to use integrations when available and to mark unavailable integration results as unverified. Outputs, mined receipts, authority-validation records, generated research memos, generated evidence ledgers, generated claim maps, generated complaint drafts, generated red-team reports, and lineage/scoring logs are drafts, source manifests, or workflow diagnostics only. They are source-linked only, not legal advice, not verified facts, not verified fact support, not good-law verification, not citation-format validation, not filing-ready, not human verification, not promoted for filing, and not reliable support.

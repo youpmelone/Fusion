@@ -392,9 +392,9 @@ describe("legal workflow full-run failure guards", () => {
     expect(issues).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "missing-stage-task", message: expect.stringContaining("lineage-scoring-log") }),
       expect.objectContaining({ code: "missing-primary-document", message: expect.stringContaining("red-team-report") }),
-      expect.objectContaining({ code: "lineage-summary-missing" }),
+      expect.objectContaining({ code: "incomplete-summary", message: expect.stringContaining("lineageScoringLog summary is not-run") }),
     ]));
-    expect(issues.some((issue) => ["missing-stage-task", "missing-primary-document", "lineage-summary-missing"].includes(issue.code))).toBe(true);
+    expect(issues.some((issue) => ["missing-stage-task", "missing-primary-document", "incomplete-summary"].includes(issue.code))).toBe(true);
   });
 
   it("represents mocked-failing external providers as diagnostics and verification gaps, not successful verified evidence", async () => {
