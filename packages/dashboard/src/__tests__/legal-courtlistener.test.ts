@@ -113,6 +113,17 @@ describe("CourtListener authority normalization", () => {
     expect(record.rawResultSummary).not.toContain("super-secret-value");
   });
 
+  it("handles CourtListener citation-keyed lookup response objects", async () => {
+    const keyed = await validateAuthorityCandidatesWithCourtListener({
+      client: new FakeCourtListenerClient({
+        "410 U.S. 113": [{ case_name: "Roe v. Wade", absolute_url: "/opinion/108713/roe-v-wade/" }],
+      }),
+      request: { citations: ["410 U.S. 113"] },
+    });
+    expect(keyed.validationRecords[0]).toMatchObject({ status: "matched", caseName: "Roe v. Wade" });
+    expect(keyed.validatedCount).toBe(1);
+  });
+
   it("treats empty citation lookup wrappers as not found and multi-cluster wrappers as ambiguous", async () => {
     const emptyWrapper = await validateAuthorityCandidatesWithCourtListener({
       client: new FakeCourtListenerClient([{ citation: "1 U.S. 1", clusters: [] }]),

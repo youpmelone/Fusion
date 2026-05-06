@@ -121,7 +121,8 @@ const MAX_SUMMARY_CHARS = 700;
 const TOKEN_RE = /["']?(?:authorization)["']?\s*[:=]\s*["']?bearer\s+[^"'\s,}]{8,}["']?|["']?(?:token|secret|api[_-]?key|password|credential|auth)["']?\s*[:=]\s*["']?[^"'\s,}]{8,}["']?|bearer\s+\S{8,}|Token\s+\S{8,}|(?:sk|pk|ghp|github_pat)[A-Za-z0-9_:\-.=+/]{8,}/gi;
 const SECRET_FLAG_VALUE_RE = /(--[A-Za-z0-9_.-]*(?:token|secret|key|password|credential|auth)[A-Za-z0-9_.-]*)(\s+)(?:"[^"]+"|'[^']+'|\S+)/gi;
 const TOKEN_KEY_RE = /(?:token|secret|api[_-]?key|password|credential|auth|authorization)/i;
-const CITATION_RE = /\b\d{1,4}\s+(?:U\.S\.|S\.Ct\.|F\.?\s?\d?d|F\.\s?Supp\.?\s?\d?d|Cal\.?\s?\d?d|N\.Y\.?\s?\d?d|P\.?\s?\d?d|A\.?\s?\d?d|So\.?\s?\d?d)\s+\d{1,5}\b/g;
+const CITATION_RE = /\b\d{1,4}\s+(?:U\.S\.|S\.Ct\.|S\.\s?Ct\.|F\.?\s?\d?d|F\.\s?4th|F\.\s?Supp\.?\s?\d?d|Cal\.?\s?\d?d|N\.Y\.?\s?\d?d|P\.?\s?\d?d|A\.?\s?\d?d|So\.?\s?\d?d)\s+\d{1,5}\b/g;
+const CITATION_KEY_RE = /\b\d{1,4}\s+(?:U\.S\.|S\.Ct\.|S\.\s?Ct\.|F\.?\s?\d?d|F\.\s?4th|F\.\s?Supp\.?\s?\d?d|Cal\.?\s?\d?d|N\.Y\.?\s?\d?d|P\.?\s?\d?d|A\.?\s?\d?d|So\.?\s?\d?d)\s+\d{1,5}\b/;
 
 function redactSecrets(value: string): string {
   return value
@@ -294,6 +295,24 @@ function extractAuthorityMatches(raw: unknown): unknown[] {
       if (Array.isArray(record[key])) {
         foundNested = true;
         matches.push(...record[key] as unknown[]);
+      }
+    }
+    if (foundNested) continue;
+
+    for (const [key, value] of Object.entries(record)) {
+      if (TOKEN_KEY_RE.test(key)) continue;
+      if (Array.isArray(value) && (CITATION_KEY_RE.test(key) || value.some((item) => {
+        const itemRecord = asRecord(item);
+        return itemRecord ? hasAuthorityFields(itemRecord) || asRecord(itemRecord.cluster) !== undefined || asRecord(itemRecord.opinion) !== undefined : false;
+      }))) {
+        matches.push(...value);
+        foundNested = true;
+      } else {
+        const valueRecord = asRecord(value);
+        if (valueRecord && (CITATION_KEY_RE.test(key) || hasAuthorityFields(valueRecord))) {
+          matches.push(valueRecord);
+          foundNested = true;
+        }
       }
     }
     if (foundNested) continue;
