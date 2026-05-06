@@ -24,6 +24,7 @@ export interface RunGhOptions {
 }
 
 const DEFAULT_GH_TIMEOUT_MS = 30_000;
+const DEFAULT_GH_CHECK_TIMEOUT_MS = 2_000;
 
 function normalizeRunGhOptions(opts: string | RunGhOptions | undefined): RunGhOptions {
   if (typeof opts === "string") return { cwd: opts };
@@ -38,6 +39,7 @@ export function isGhAvailable(): boolean {
     execFileSync("gh", ["--version"], {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "ignore"],
+      timeout: DEFAULT_GH_CHECK_TIMEOUT_MS,
     });
     return true;
   } catch {
@@ -54,6 +56,7 @@ export function isGhAuthenticated(): boolean {
     const result = execFileSync("gh", ["auth", "status"], {
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "ignore"],
+      timeout: DEFAULT_GH_CHECK_TIMEOUT_MS,
     });
     // gh auth status returns 0 and outputs "Logged in" if authenticated
     return result.includes("Logged in") || result.includes("Authenticated");

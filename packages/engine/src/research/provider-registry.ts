@@ -74,7 +74,7 @@ export class ResearchProviderRegistry {
       ["llm-synthesis", new LLMSynthesisProvider({ projectRoot: this.projectRoot })],
     ]);
 
-    log.log("providers refreshed", { available: this.getAvailableProviders(), backend });
+    log.log("providers refreshed", { registered: [...this.providers.keys()], backend });
   }
 
   private resolveSearchBackend(): WebSearchBackend {
