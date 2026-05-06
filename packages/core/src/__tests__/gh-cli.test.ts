@@ -1,19 +1,21 @@
 import { describe, it, expect, vi } from "vitest";
 
-const { mockExecFile } = vi.hoisted(() => ({
+const { mockExecFile, mockExecFileSync } = vi.hoisted(() => ({
   mockExecFile: vi.fn(),
+  mockExecFileSync: vi.fn(),
 }));
 
-// Mock child_process before importing gh-cli so runGhAsync's `execFile`
-// reference uses our stub. We only mock execFile because the timeout path
-// is what we need to exercise; the synchronous helpers don't go through it.
+// Mock child_process before importing gh-cli so the synchronous availability
+// helpers and runGhAsync use deterministic child-process stubs.
 vi.mock("node:child_process", async () => {
   const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
-  return { ...actual, execFile: mockExecFile };
+  return { ...actual, execFile: mockExecFile, execFileSync: mockExecFileSync };
 });
 
 import {
   getGhErrorMessage,
+  isGhAuthenticated,
+  isGhAvailable,
   parseRepoFromRemote,
   runGhAsync,
 } from "../gh-cli.js";
@@ -45,6 +47,50 @@ describe("getGhErrorMessage", () => {
     expect(getGhErrorMessage("string error")).toBe("string error");
     expect(getGhErrorMessage(123)).toBe("123");
     expect(getGhErrorMessage(null)).toBe("null");
+  });
+});
+
+describe("GitHub CLI availability helpers", () => {
+  it("checks gh availability with a bounded sync timeout", () => {
+    mockExecFileSync.mockReset();
+    mockExecFileSync.mockReturnValue("gh version 2.40.0");
+
+    expect(isGhAvailable()).toBe(true);
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      "gh",
+      ["--version"],
+      expect.objectContaining({ timeout: 2_000 }),
+    );
+  });
+
+  it("returns false when the availability check times out or fails", () => {
+    mockExecFileSync.mockReset();
+    mockExecFileSync.mockImplementation(() => {
+      throw Object.assign(new Error("spawnSync gh ETIMEDOUT"), { code: "ETIMEDOUT" });
+    });
+
+    expect(isGhAvailable()).toBe(false);
+  });
+
+  it("checks gh auth status with a bounded sync timeout", () => {
+    mockExecFileSync.mockReset();
+    mockExecFileSync.mockReturnValue("✓ Authenticated with github.com");
+
+    expect(isGhAuthenticated()).toBe(true);
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      "gh",
+      ["auth", "status"],
+      expect.objectContaining({ timeout: 2_000 }),
+    );
+  });
+
+  it("returns false when the auth check times out or fails", () => {
+    mockExecFileSync.mockReset();
+    mockExecFileSync.mockImplementation(() => {
+      throw Object.assign(new Error("spawnSync gh ETIMEDOUT"), { code: "ETIMEDOUT" });
+    });
+
+    expect(isGhAuthenticated()).toBe(false);
   });
 });
 
