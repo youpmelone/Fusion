@@ -262,12 +262,13 @@ describe("research memo generation", () => {
 
   it("redacts secret-like values from memo content and metadata", async () => {
     const store = new FakeTaskStore();
-    seedPrerequisites(store, { receipts: [receipt({ excerpt: "token=super-secret-token-value authorization: bearer abcdefghijklmnop --obsidian-api-key standalone-secret-value" })] });
+    seedPrerequisites(store, { receipts: [receipt({ excerpt: "token=super-secret-token-value authorization: bearer abcdefghijklmnop Authorization: Basic dXNlcjpwYXNzd29yZA== --obsidian-api-key standalone-secret-value" })] });
     await generateCounterLawsuitResearchMemo({ taskStore: store as never, runId: "CLW-1" });
     const memo = await store.getTaskDocument("FN-1", RESEARCH_MEMO_DOCUMENT_KEY);
     const serialized = `${memo?.content}\n${JSON.stringify(memo?.metadata)}`;
     expect(serialized).not.toContain("super-secret-token-value");
     expect(serialized).not.toContain("abcdefghijklmnop");
+    expect(serialized).not.toContain("dXNlcjpwYXNzd29yZA");
     expect(serialized).not.toContain("standalone-secret-value");
     expect(serialized).toContain("[REDACTED]");
   });
