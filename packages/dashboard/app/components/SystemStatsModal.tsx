@@ -84,7 +84,7 @@ export function SystemStatsModal({ isOpen, onClose, projectId }: SystemStatsModa
   const [stats, setStats] = useState<SystemStatsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [autoKillEnabled, setAutoKillEnabled] = useState(true);
+  const [autoKillEnabled, setAutoKillEnabled] = useState(false);
   const [killThreshold, setKillThreshold] = useState(90);
   const [isKilling, setIsKilling] = useState(false);
   const [confirmKill, setConfirmKill] = useState(false);
@@ -128,7 +128,7 @@ export function SystemStatsModal({ isOpen, onClose, projectId }: SystemStatsModa
     const loadSettings = async () => {
       try {
         const settings = await fetchGlobalSettings();
-        setAutoKillEnabled(settings.vitestAutoKillEnabled ?? true);
+        setAutoKillEnabled(settings.vitestAutoKillEnabled ?? false);
         setKillThreshold(settings.vitestKillThresholdPct ?? 90);
         setSettingsError(null);
       } catch (err) {

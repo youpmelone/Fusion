@@ -11,6 +11,11 @@ function loadPackageJson(packageDir: string): any {
   return JSON.parse(readFileSync(path, "utf-8"));
 }
 
+function loadPluginPackageJson(pluginDir: string): any {
+  const path = join(workspaceRoot, "plugins", pluginDir, "package.json");
+  return JSON.parse(readFileSync(path, "utf-8"));
+}
+
 function loadWorkflowYaml(name: string): any {
   const path = join(workspaceRoot, ".github", "workflows", name);
   const content = readFileSync(path, "utf-8");
@@ -213,6 +218,20 @@ describe("Scoped @fusion/* packages publishing config", () => {
   }
 });
 
+describe("Private runtime plugin package contract", () => {
+  it.each([
+    "fusion-plugin-hermes-runtime",
+    "fusion-plugin-openclaw-runtime",
+    "fusion-plugin-paperclip-runtime",
+  ])("%s exposes source exports for clean-worktree CLI bundling", (pluginDir) => {
+    const pkg = loadPluginPackageJson(pluginDir);
+
+    expect(pkg.exports?.["."]?.source).toBe("./src/index.ts");
+    expect(pkg.exports?.["."]?.types).toBe("./src/index.ts");
+    expect(pkg.exports?.["."]?.import).toBe("./dist/index.js");
+  });
+});
+
 describe("Workspace bootstrap script contract", () => {
   const rootPkg = loadRootPackageJson();
 
@@ -237,7 +256,8 @@ describe("Workspace bootstrap script contract", () => {
           if (!existsSync(packagePath) || !existsSync(configPath)) return false;
 
           const pkg = JSON.parse(readFileSync(packagePath, "utf-8"));
-          return typeof pkg.scripts?.test === "string" && pkg.scripts.test.includes("vitest");
+          if (typeof pkg.scripts?.test !== "string") return false;
+          return pkg.scripts.test.includes("vitest") || pkg.scripts.test.includes("run-vt.mjs");
         });
     });
 

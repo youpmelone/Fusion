@@ -33,8 +33,12 @@ describe("MissionStore planning context integration", () => {
   });
 
   afterEach(async () => {
-    vi.useRealTimers();
-    await rm(rootDir, { recursive: true, force: true });
+    try {
+      taskStore.close();
+    } finally {
+      vi.useRealTimers();
+      await rm(rootDir, { recursive: true, force: true });
+    }
   });
 
   describe("buildEnrichedDescription", () => {

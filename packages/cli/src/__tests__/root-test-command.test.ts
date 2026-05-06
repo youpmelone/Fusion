@@ -1,10 +1,45 @@
 import { describe, expect, it } from "vitest";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   decideExecutionPlan,
   resolveAffectedPackages,
   shouldForceFullSuite,
 } from "../../../../scripts/test-changed.mjs";
-import { parseShardArgs, selectShardPackages } from "../../../../scripts/ci-test-shard.mjs";
+import {
+  DEFAULT_TEST_PACKAGES,
+  parseShardArgs,
+  selectShardPackages,
+} from "../../../../scripts/ci-test-shard.mjs";
+
+const workspaceRoot = join(__dirname, "..", "..", "..", "..");
+
+function collectWorkspaceTestPackageNames(): string[] {
+  const names: string[] = [];
+
+  function visit(dir: string): void {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const packageDir = join(dir, entry.name);
+      const packageJsonPath = join(packageDir, "package.json");
+      if (existsSync(packageJsonPath)) {
+        const pkg = JSON.parse(readFileSync(packageJsonPath, "utf-8"));
+        if (typeof pkg.scripts?.test === "string") {
+          names.push(pkg.name);
+        }
+        continue;
+      }
+      visit(packageDir);
+    }
+  }
+
+  for (const root of ["packages", "plugins"]) {
+    const rootPath = join(workspaceRoot, root);
+    if (existsSync(rootPath)) visit(rootPath);
+  }
+
+  return names.sort();
+}
 
 describe("root test command changed-only planning", () => {
   it("uses changed mode when package-only changes are detected", () => {
@@ -76,5 +111,9 @@ describe("CI shard test planner", () => {
     expect(selectShardPackages(packages, 1, 3)).toEqual(["a", "d"]);
     expect(selectShardPackages(packages, 2, 3)).toEqual(["b", "e"]);
     expect(selectShardPackages(packages, 3, 3)).toEqual(["c"]);
+  });
+
+  it("covers every workspace package with a test script", () => {
+    expect([...DEFAULT_TEST_PACKAGES].sort()).toEqual(collectWorkspaceTestPackageNames());
   });
 });

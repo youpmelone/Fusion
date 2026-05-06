@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { TaskStore } from "../store.js";
 import { sortTasksByPriorityThenAgeAndId } from "../task-priority.js";
+import type { Database } from "../db.js";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";
@@ -8,6 +9,12 @@ import { tmpdir } from "node:os";
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "kb-store-sort-test-"));
+}
+
+function getPrivateDb(store: TaskStore): Database {
+  const db = (store as unknown as { _db: Database | null })._db;
+  if (!db) throw new Error("Expected TaskStore database to be initialized");
+  return db;
 }
 
 describe("TaskStore.listTasks() sort order", () => {
@@ -21,8 +28,11 @@ describe("TaskStore.listTasks() sort order", () => {
   });
 
   afterEach(async () => {
-    store.stopWatching();
-    await rm(rootDir, { recursive: true, force: true });
+    try {
+      store.close();
+    } finally {
+      await rm(rootDir, { recursive: true, force: true });
+    }
   });
 
   it("returns tasks with identical createdAt in ascending ID order", async () => {
@@ -31,20 +41,19 @@ describe("TaskStore.listTasks() sort order", () => {
     const t2 = await store.createTask({ description: "Task two" });
     const t3 = await store.createTask({ description: "Task three" });
 
-    // Force identical createdAt by rewriting the task.json files
-    const { readFile, writeFile } = await import("node:fs/promises");
-    const tasksDir = join(rootDir, ".fusion", "tasks");
+    // Force identical createdAt in SQLite, where listTasks() reads active tasks.
     const sameTimestamp = "2026-06-01T00:00:00Z";
-
+    const db = getPrivateDb(store);
     for (const t of [t1, t2, t3]) {
-      const jsonPath = join(tasksDir, t.id, "task.json");
-      const data = JSON.parse(await readFile(jsonPath, "utf-8"));
-      data.createdAt = sameTimestamp;
-      data.updatedAt = sameTimestamp;
-      await writeFile(jsonPath, JSON.stringify(data, null, 2));
+      db.prepare("UPDATE tasks SET createdAt = ?, updatedAt = ? WHERE id = ?").run(
+        sameTimestamp,
+        sameTimestamp,
+        t.id,
+      );
     }
 
     const tasks = await store.listTasks();
+    expect(tasks.every((task) => task.createdAt === sameTimestamp)).toBe(true);
     const ids = tasks.map((t) => t.id);
 
     // Should be ascending by numeric ID portion

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { MissionStore } from "../mission-store.js";
 import { Database } from "../db.js";
+import type { TaskStore } from "../store.js";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -28,6 +29,7 @@ describe("MissionStore", () => {
   let fusionDir: string;
   let db: Database;
   let store: MissionStore;
+  let managedTaskStores: TaskStore[];
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
@@ -38,15 +40,33 @@ describe("MissionStore", () => {
     db = new Database(fusionDir, { inMemory: true });
     db.init();
     store = new MissionStore(fusionDir, db);
+    managedTaskStores = [];
   });
+
+  async function createManagedTaskStore(): Promise<TaskStore> {
+    const { TaskStore } = await import("../store.js");
+    const taskStore = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+    managedTaskStores.push(taskStore);
+    return taskStore;
+  }
 
   afterEach(async () => {
     try {
-      db.close();
-    } catch {
-      // already closed
+      for (const taskStore of managedTaskStores.splice(0).reverse()) {
+        try {
+          taskStore.close();
+        } catch {
+          // already closed
+        }
+      }
+      try {
+        db.close();
+      } catch {
+        // already closed
+      }
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
     }
-    await rm(tmpDir, { recursive: true, force: true });
   });
 
   // ── Mission CRUD Tests ────────────────────────────────────────────────
@@ -1663,8 +1683,7 @@ describe("MissionStore", () => {
 
     it("throws if feature not found", async () => {
       // Need a TaskStore reference for this test
-      const { TaskStore } = await import("../store.js");
-      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const ts = await createManagedTaskStore();
       const msWithTs = ts.getMissionStore();
 
       await expect(msWithTs.triageFeature("F-NONEXISTENT")).rejects.toThrow(
@@ -1673,8 +1692,7 @@ describe("MissionStore", () => {
     });
 
     it("throws if feature is already triaged", async () => {
-      const { TaskStore } = await import("../store.js");
-      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const ts = await createManagedTaskStore();
       const msWithTs = ts.getMissionStore();
 
       const mission = msWithTs.createMission({ title: "Mission" });
@@ -1693,8 +1711,7 @@ describe("MissionStore", () => {
     });
 
     it("creates a task and links it to the feature", async () => {
-      const { TaskStore } = await import("../store.js");
-      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const ts = await createManagedTaskStore();
       const msWithTs = ts.getMissionStore();
 
       const mission = msWithTs.createMission({ title: "Mission" });
@@ -1725,8 +1742,7 @@ describe("MissionStore", () => {
     });
 
     it("uses provided title and description overrides", async () => {
-      const { TaskStore } = await import("../store.js");
-      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const ts = await createManagedTaskStore();
       const msWithTs = ts.getMissionStore();
 
       const mission = msWithTs.createMission({ title: "Mission" });
@@ -1746,8 +1762,7 @@ describe("MissionStore", () => {
     });
 
     it("emits feature:linked event", async () => {
-      const { TaskStore } = await import("../store.js");
-      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const ts = await createManagedTaskStore();
       const msWithTs = ts.getMissionStore();
 
       const linkedHandler = vi.fn();
@@ -1781,8 +1796,7 @@ describe("MissionStore", () => {
     });
 
     it("throws if slice not found", async () => {
-      const { TaskStore } = await import("../store.js");
-      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const ts = await createManagedTaskStore();
       const msWithTs = ts.getMissionStore();
 
       await expect(msWithTs.triageSlice("SL-NONEXISTENT")).rejects.toThrow(
@@ -1791,8 +1805,7 @@ describe("MissionStore", () => {
     });
 
     it("triages all defined features in a slice", async () => {
-      const { TaskStore } = await import("../store.js");
-      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const ts = await createManagedTaskStore();
       const msWithTs = ts.getMissionStore();
 
       const mission = msWithTs.createMission({ title: "Mission" });
@@ -1818,8 +1831,7 @@ describe("MissionStore", () => {
     });
 
     it("skips already triaged features", async () => {
-      const { TaskStore } = await import("../store.js");
-      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const ts = await createManagedTaskStore();
       const msWithTs = ts.getMissionStore();
 
       const mission = msWithTs.createMission({ title: "Mission" });
@@ -1840,8 +1852,7 @@ describe("MissionStore", () => {
     });
 
     it("returns empty array if no defined features", async () => {
-      const { TaskStore } = await import("../store.js");
-      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const ts = await createManagedTaskStore();
       const msWithTs = ts.getMissionStore();
 
       const mission = msWithTs.createMission({ title: "Mission" });
@@ -1861,8 +1872,7 @@ describe("MissionStore", () => {
       ts: import("../store.js").TaskStore;
       ms: MissionStore;
     }> {
-      const { TaskStore } = await import("../store.js");
-      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      const ts = await createManagedTaskStore();
       const ms = ts.getMissionStore();
       return { ts, ms };
     }

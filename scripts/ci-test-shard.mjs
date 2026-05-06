@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureTestArtifacts } from "./ensure-test-artifacts.mjs";
 
-const DEFAULT_TEST_PACKAGES = [
+export const DEFAULT_TEST_PACKAGES = [
   "@fusion/core",
   "@fusion/engine",
   "@fusion/dashboard",
@@ -15,6 +15,16 @@ const DEFAULT_TEST_PACKAGES = [
   "@fusion/mobile",
   "@fusion/droid-cli",
   "@fusion/pi-claude-cli",
+  "@fusion/pi-llama-cpp",
+  "@fusion-plugin-examples/auto-label",
+  "@fusion-plugin-examples/ci-status",
+  "@fusion-plugin-examples/notification",
+  "@fusion-plugin-examples/settings-demo",
+  "@fusion-plugin-examples/dependency-graph",
+  "@fusion-plugin-examples/droid-runtime",
+  "@fusion-plugin-examples/hermes-runtime",
+  "@fusion-plugin-examples/openclaw-runtime",
+  "@fusion-plugin-examples/paperclip-runtime",
 ];
 
 function run(command, commandArgs, options = {}) {

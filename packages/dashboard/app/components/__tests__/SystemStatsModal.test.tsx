@@ -234,6 +234,15 @@ describe("SystemStatsModal", () => {
     });
   });
 
+  it("defaults auto-kill to disabled when no saved setting exists", async () => {
+    mockFetchGlobalSettings.mockResolvedValue({ vitestKillThresholdPct: 90 });
+
+    render(<SystemStatsModal isOpen={true} onClose={vi.fn()} />);
+
+    const toggle = (await screen.findByLabelText("Auto-kill vitest on memory pressure")) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+  });
+
   it("persists auto-kill toggle changes", async () => {
     render(<SystemStatsModal isOpen={true} onClose={vi.fn()} />);
 
