@@ -222,7 +222,6 @@ const TOKEN_RE = /(["']?(?:authorization)["']?\s*[:=]\s*["']?)(?!\[REDACTED\])[^
 const SECRET_FLAG_VALUE_RE = /(--[A-Za-z0-9_.-]*(?:token|secret|key|password|credential|auth)[A-Za-z0-9_.-]*)(\s+)(?:"[^"]+"|'[^']+'|\S+)/gi;
 
 const STAGE_INDEX = new Map(COUNTER_LAWSUIT_STAGE_DEFINITIONS.map((stage, index) => [stage.stage, index]));
-const EXPECTED_STAGE_DOCUMENT_KEYS = COUNTER_LAWSUIT_STAGE_DEFINITIONS.map((stage) => stage.documentKey);
 const STATUS_DOCUMENT_KEYS = new Set([
   RESEARCH_MEMO_STATUS_DOCUMENT_KEY,
   EVIDENCE_LEDGER_STATUS_DOCUMENT_KEY,
@@ -238,6 +237,28 @@ const REQUIRED_UPSTREAM_DOCUMENT_KEYS = [
   DRAFT_COMPLAINT_DOCUMENT_KEY,
   RED_TEAM_REPORT_DOCUMENT_KEY,
 ];
+const TRACKED_DRAFT_VERSION_DOCUMENT_KEYS = new Set([
+  RESEARCH_MEMO_DOCUMENT_KEY,
+  RESEARCH_MEMO_STATUS_DOCUMENT_KEY,
+  EVIDENCE_LEDGER_DOCUMENT_KEY,
+  EVIDENCE_LEDGER_STATUS_DOCUMENT_KEY,
+  CLAIM_MAP_DOCUMENT_KEY,
+  CLAIM_MAP_STATUS_DOCUMENT_KEY,
+  DRAFT_COMPLAINT_DOCUMENT_KEY,
+  DRAFT_COMPLAINT_STATUS_DOCUMENT_KEY,
+  RED_TEAM_REPORT_DOCUMENT_KEY,
+  RED_TEAM_REPORT_STATUS_DOCUMENT_KEY,
+  COUNTER_LAWSUIT_RUN_DOCUMENT_KEY,
+  COUNTER_LAWSUIT_STAGE_DOCUMENT_KEY,
+  LINEAGE_SCORING_LOG_DOCUMENT_KEY,
+  LINEAGE_SCORING_LOG_STATUS_DOCUMENT_KEY,
+]);
+
+interface LineageManifestContext {
+  task: Task;
+  document: TaskDocument;
+  parsed: ParsedDocument;
+}
 
 function redactSecrets(value: string): string {
   return value
@@ -482,6 +503,7 @@ function promptTrace(params: {
 }): LineagePromptTrace | undefined {
   const excerpt = boundedText(params.text, 700);
   if (!excerpt) return undefined;
+  const lowerText = params.text.toLowerCase();
   return {
     traceId: stableId(params.sourceType, params.taskId, params.documentKey, params.workflowStep?.id, hashText(excerpt).slice(0, 12)),
     sourceType: params.sourceType,
@@ -493,11 +515,20 @@ function promptTrace(params: {
     contentHash: hashText(params.text),
     excerpt,
     safetyGateRefs: uniqueSorted([
-      params.text.includes("citation") || params.text.includes("source") ? "citation-source-verification" : undefined,
-      params.text.includes("red-team") || params.text.includes("opposing-counsel") ? "opposing-counsel-red-team" : undefined,
-      params.text.includes("lineage") ? "lineage-preservation" : undefined,
+      lowerText.includes("citation") || lowerText.includes("source") ? "citation-source-verification" : undefined,
+      lowerText.includes("red-team") || lowerText.includes("opposing-counsel") ? "opposing-counsel-red-team" : undefined,
+      lowerText.includes("lineage") ? "lineage-preservation" : undefined,
     ]),
   };
+}
+
+function severityWeight(value: unknown): number {
+  const severity = boundedText(value, 80)?.toLowerCase();
+  if (severity === "blocker") return 5;
+  if (severity === "high" || severity === "error") return 4;
+  if (severity === "warning" || severity === "medium") return 2;
+  if (severity === "info" || severity === "low") return 1;
+  return 1;
 }
 
 function collectSearchTracesFromManifest(params: {
@@ -523,9 +554,9 @@ function collectSearchTracesFromManifest(params: {
       contentHash: query ? hashText(query) : undefined,
     });
   }
-  for (const record of manifestArray(params.manifest, ["receipts", "evidence", "sourceLinks"])) {
+  for (const record of manifestArray(params.manifest, ["receipts", "evidence", "sourceLinks", "sourceReferences", "supportingEvidence"])) {
     const sourcePath = boundedText(record.sourcePath, 300);
-    const receiptId = boundedText(record.receiptId, 180);
+    const receiptId = boundedText(record.receiptId, 180) ?? boundedText(record.sourceReferenceId, 180) ?? boundedText(record.evidenceId, 180);
     const query = boundedText(record.query, 300);
     traces.push({
       traceId: stableId("source", params.task.id, params.documentKey, receiptId ?? sourcePath, traces.length),
@@ -542,7 +573,169 @@ function collectSearchTracesFromManifest(params: {
       contentHash: hashText(JSON.stringify({ sourcePath, receiptId, query })),
     });
   }
+  for (const record of manifestArray(params.manifest, ["candidates", "validationRecords", "authorities"])) {
+    const candidate = boundedText(record.input ?? record.normalizedCitation ?? record.caseName ?? record.citation, 300);
+    const recordId = boundedText(record.recordId, 180) ?? boundedText(record.authorityRecordId, 180);
+    const url = boundedText(record.courtListenerUrl ?? record.absoluteUrl, 300);
+    traces.push({
+      traceId: stableId("authority", params.task.id, params.documentKey, recordId ?? candidate, traces.length),
+      sourceTaskId: params.task.id,
+      sourceDocumentKey: params.documentKey,
+      workflowStage: stageOfTask(params.task),
+      query: candidate,
+      sourceSystem: boundedText(record.source, 120) ?? "courtlistener",
+      providerName: "courtlistener",
+      toolName: boundedText(record.inputType, 120) ?? boundedText(record.endpoint, 120) ?? "authority-lookup",
+      sourcePath: url,
+      receiptIds: [],
+      authorityRecordIds: uniqueSorted([recordId, ...stringArray(record.authorityRecordIds)]),
+      contentHash: hashText(JSON.stringify({ candidate, recordId, status: boundedText(record.status, 120) })),
+    });
+  }
   return traces;
+}
+
+function sourceIdsForContexts(contexts: LineageManifestContext[], documentKeys: string[]): { taskIds: string[]; documentKeys: string[] } {
+  return {
+    taskIds: uniqueSorted(contexts.filter((context) => documentKeys.includes(context.document.key)).map((context) => context.task.id)),
+    documentKeys: uniqueSorted(documentKeys.filter((key) => contexts.some((context) => context.document.key === key))),
+  };
+}
+
+function critiqueScoresFromContexts(params: {
+  contexts: LineageManifestContext[];
+  diagnostics: LineageDiagnostic[];
+  malformed: number;
+  statusBlockers: number;
+  upstreamMissing: number;
+}): LineageCritiqueScore[] {
+  const manifests = params.contexts.map((context) => context.parsed.manifest).filter((manifest): manifest is Record<string, unknown> => Boolean(manifest));
+  const countWhere = (keys: string[], predicate: (record: Record<string, unknown>) => boolean): number =>
+    manifests.flatMap((manifest) => keys.flatMap((key) => manifestArray(manifest, [key]))).filter(predicate).length;
+  const sourceLinkTotal = countWhere(["receipts", "evidence", "sourceLinks", "sourceReferences", "supportingEvidence", "paragraphs", "claimDrafts"], () => true);
+  const sourceLinkMissing = countWhere(["evidence", "sourceLinks", "sourceReferences", "supportingEvidence", "paragraphs", "claimDrafts"], (record) =>
+    stringArray(record.sourcePaths).length === 0
+    && stringArray(record.receiptIds).length === 0
+    && !boundedText(record.sourcePath, 300)
+    && !boundedText(record.receiptId, 180));
+  const authorities = manifests.flatMap((manifest) => [
+    ...manifestArray(manifest, ["authorities", "validationRecords"]),
+    ...manifestArray(manifest, ["citationStatuses"]),
+  ]);
+  const unresolvedAuthorities = authorities.filter((record) => {
+    const status = boundedText(record.status, 120)?.toLowerCase();
+    return status === "unresolved-authority-lookup-record" || status === "not-found" || status === "ambiguous" || status === "unavailable" || status === "failed";
+  }).length;
+  const humanCitationNeeds = countWhere(["citationStatuses", "citationIssues"], (record) => {
+    const status = boundedText(record.status, 120)?.toLowerCase();
+    return status?.includes("human") === true || record.humanVerificationRequired === true;
+  });
+  const complaintSupportGaps = countWhere(["missingProof", "paragraphs", "claimDrafts"], (record) =>
+    Boolean(record.unresolved ?? record.unresolvedDraftOnly)
+    || boundedText(record.status, 120) === "blocked"
+    || stringArray(record.missingProofIds).length > 0
+    || (stringArray(record.sourcePaths).length === 0 && stringArray(record.receiptIds).length === 0));
+  const redTeamRows = manifests.flatMap((manifest) => [
+    ...manifestArray(manifest, ["findings"]),
+    ...manifestArray(manifest, ["mtdAttacks"]),
+    ...manifestArray(manifest, ["citationIssues"]),
+    ...manifestArray(manifest, ["revisionRecommendations"]),
+  ]);
+  const redTeamWeight = redTeamRows.reduce((total, record) => total + severityWeight(record.severity), 0);
+  const mtdAttackCount = countWhere(["mtdAttacks"], () => true);
+  const citationIssueCount = countWhere(["citationIssues"], () => true);
+  const revisionRecommendationCount = countWhere(["revisionRecommendations"], () => true);
+  const unresolvedBlockers = params.diagnostics.filter((diagnostic) => diagnostic.severity === "error").length + params.statusBlockers + params.upstreamMissing;
+  const score = (scoreId: string, label: string, value: number, sourceDocumentKeys: string[], diagnosticCodes: string[], explanation: string): LineageCritiqueScore => {
+    const sources = sourceIdsForContexts(params.contexts, sourceDocumentKeys);
+    return { scoreId, label, value, maxValue: Math.max(value, 1), sourceTaskIds: sources.taskIds, sourceDocumentKeys: sources.documentKeys, diagnosticCodes, explanation };
+  };
+  return [
+    score("source-link-completeness-gaps", "Source-link completeness gaps", sourceLinkMissing, [RESEARCH_MEMO_DOCUMENT_KEY, EVIDENCE_LEDGER_DOCUMENT_KEY, CLAIM_MAP_DOCUMENT_KEY, DRAFT_COMPLAINT_DOCUMENT_KEY], ["missing-source-link"], `Found ${sourceLinkMissing} source-linked row(s) without bounded source paths or receipts out of ${sourceLinkTotal} inspected rows.`),
+    score("authority-resolution-gaps", "Authority resolution gaps", unresolvedAuthorities, [RESEARCH_MEMO_DOCUMENT_KEY, EVIDENCE_LEDGER_DOCUMENT_KEY], ["unresolved-authority"], "Counts CourtListener or citation-status rows that remain unmatched, ambiguous, unavailable, or unresolved."),
+    score("citation-human-review-needs", "Citation human-review needs", humanCitationNeeds + citationIssueCount, [EVIDENCE_LEDGER_DOCUMENT_KEY, RED_TEAM_REPORT_DOCUMENT_KEY], ["needs-human-citation-verification"], "Counts citation statuses and red-team citation issues that still require human review."),
+    score("unresolved-blockers", "Unresolved blocker count", unresolvedBlockers, REQUIRED_UPSTREAM_DOCUMENT_KEYS, ["status-document-blocker", "missing-upstream-artifact"], "Counts status-document blockers, missing upstream artifacts, and error diagnostics."),
+    score("complaint-draft-support-gaps", "Complaint draft support gaps", complaintSupportGaps, [CLAIM_MAP_DOCUMENT_KEY, DRAFT_COMPLAINT_DOCUMENT_KEY], ["missing-proof"], "Counts missing-proof rows, unsupported paragraphs, and unsupported claim drafts."),
+    score("red-team-risk-pressure", "Red-team finding severity pressure", redTeamWeight + mtdAttackCount + revisionRecommendationCount, [RED_TEAM_REPORT_DOCUMENT_KEY], ["red-team-finding", "mtd-attack", "revision-recommendation"], "Weighted count of red-team findings, MTD attacks, citation issues, and revision recommendations."),
+    score("malformed-or-stale-manifests", "Malformed or stale manifest blockers", params.malformed + params.statusBlockers, REQUIRED_UPSTREAM_DOCUMENT_KEYS, ["malformed-manifest", "status-document-blocker"], "Counts malformed primary manifests and stale, blocked, failed, or partial status documents."),
+  ];
+}
+
+function rejectedVariantsFromContext(params: {
+  task: Task;
+  document: TaskDocument;
+  parsed: ParsedDocument;
+}): LineageRejectedVariant[] {
+  const workflowStage = stageOfTask(params.task);
+  const variants: LineageRejectedVariant[] = [];
+  if (params.parsed.source === "malformed") {
+    variants.push({
+      variantId: stableId("malformed-manifest", params.task.id, params.document.key, params.document.revision),
+      sourceTaskId: params.task.id,
+      sourceDocumentKey: params.document.key,
+      workflowStage,
+      revision: params.document.revision,
+      reason: "Malformed artifact manifest is preserved as history but rejected as a scoring input until regenerated safely.",
+      preserved: true,
+    });
+  }
+  const status = statusFromManifest(params.parsed.manifest);
+  if (STATUS_DOCUMENT_KEYS.has(params.document.key) && status && status !== "completed") {
+    variants.push({
+      variantId: stableId("status-blocker", params.task.id, params.document.key, status),
+      sourceTaskId: params.task.id,
+      sourceDocumentKey: params.document.key,
+      workflowStage,
+      revision: params.document.revision,
+      reason: `Status document reports ${status}; any stale or superseded artifact remains preserved but is not promoted.`,
+      preserved: true,
+    });
+  }
+  for (const paragraph of manifestArray(params.parsed.manifest, ["paragraphs"])) {
+    const paragraphId = boundedText(paragraph.paragraphId, 120) ?? boundedText(paragraph.id, 120);
+    const unsupported = boundedText(paragraph.status, 120) === "blocked"
+      || paragraph.unresolvedDraftOnly === true
+      || stringArray(paragraph.sourcePaths).length === 0
+      || stringArray(paragraph.receiptIds).length === 0;
+    if (unsupported) variants.push({
+      variantId: stableId("unsupported-paragraph", params.task.id, params.document.key, paragraphId),
+      sourceTaskId: params.task.id,
+      sourceDocumentKey: params.document.key,
+      workflowStage,
+      revision: params.document.revision,
+      reason: `Complaint paragraph ${paragraphId ?? "unknown"} is unsupported, blocked, or draft-only and remains preserved as a rejected variant.`,
+      preserved: true,
+    });
+  }
+  for (const claim of manifestArray(params.parsed.manifest, ["claimDrafts", "claims"])) {
+    const claimId = boundedText(claim.claimDraftId, 120) ?? boundedText(claim.claimId, 120);
+    const unsupported = boundedText(claim.status, 120) === "blocked"
+      || claim.unresolvedDraftOnly === true
+      || stringArray(claim.missingProofIds).length > 0
+      || stringArray(claim.sourcePaths).length === 0;
+    if (unsupported) variants.push({
+      variantId: stableId("unsupported-claim-draft", params.task.id, params.document.key, claimId),
+      sourceTaskId: params.task.id,
+      sourceDocumentKey: params.document.key,
+      workflowStage,
+      revision: params.document.revision,
+      reason: `Claim draft ${claimId ?? "unknown"} has missing proof, unsupported source lineage, or draft-only blockers and is not promoted.`,
+      preserved: true,
+    });
+  }
+  for (const recommendation of manifestArray(params.parsed.manifest, ["revisionRecommendations"])) {
+    const recommendationId = boundedText(recommendation.recommendationId, 120) ?? boundedText(recommendation.id, 120);
+    variants.push({
+      variantId: stableId("red-team-recommendation", params.task.id, params.document.key, recommendationId),
+      sourceTaskId: params.task.id,
+      sourceDocumentKey: params.document.key,
+      workflowStage,
+      revision: params.document.revision,
+      reason: `Red-team recommendation ${recommendationId ?? "unknown"} requires narrowing, removal, or further review before any downstream use.`,
+      preserved: true,
+    });
+  }
+  return variants;
 }
 
 function stageTraceFromTask(task: Task): LineageStageTrace {
@@ -638,6 +831,7 @@ export async function collectCounterLawsuitLineageScoringLogInputs(options: Coll
   const draftVersions: LineageDraftVersion[] = [];
   const rejectedVariants: LineageRejectedVariant[] = [];
   const diagnostics: LineageDiagnostic[] = [];
+  const manifestContexts: LineageManifestContext[] = [];
   let malformed = 0;
   let statusBlockers = 0;
 
@@ -650,6 +844,7 @@ export async function collectCounterLawsuitLineageScoringLogInputs(options: Coll
       .sort((left, right) => left.key.localeCompare(right.key) || left.revision - right.revision);
     for (const document of documents) {
       const parsed = parseManifestFromDocument(document, document.key);
+      manifestContexts.push({ task, document, parsed });
       if (parsed.source === "malformed") malformed += 1;
       diagnostics.push(...parsed.diagnostics);
       diagnostics.push(...diagnosticsFromManifest(parsed.manifest, document.key, task.id));
@@ -676,7 +871,7 @@ export async function collectCounterLawsuitLineageScoringLogInputs(options: Coll
         const stagePrompt = promptTrace({ sourceType: "stage-document", text: document.content, taskId: task.id, workflowStage, documentKey: document.key });
         if (stagePrompt) promptTraces.push(stagePrompt);
       }
-      if (EXPECTED_STAGE_DOCUMENT_KEYS.includes(document.key)) {
+      if (TRACKED_DRAFT_VERSION_DOCUMENT_KEYS.has(document.key)) {
         draftVersions.push(draftVersionFromCurrent({ task, document, parsed }));
         for (const revision of revisions) {
           draftVersions.push(draftVersionFromRevision({ task, documentKey: document.key, revision }));
@@ -691,6 +886,7 @@ export async function collectCounterLawsuitLineageScoringLogInputs(options: Coll
           });
         }
       }
+      rejectedVariants.push(...rejectedVariantsFromContext({ task, document, parsed }));
       searchTraces.push(...collectSearchTracesFromManifest({ task, documentKey: document.key, manifest: parsed.manifest }));
     }
   }
@@ -729,6 +925,13 @@ export async function collectCounterLawsuitLineageScoringLogInputs(options: Coll
     statusBlockers,
     diagnostics: normalizedDiagnostics,
   });
+  const critiqueScores = critiqueScoresFromContexts({
+    contexts: manifestContexts,
+    diagnostics: normalizedDiagnostics,
+    malformed,
+    statusBlockers,
+    upstreamMissing,
+  }).sort((left, right) => left.scoreId.localeCompare(right.scoreId));
   const promotion = promotionRationale(normalizedDiagnostics);
   const base = {
     runId: options.runId,
@@ -742,7 +945,7 @@ export async function collectCounterLawsuitLineageScoringLogInputs(options: Coll
     promptTraces: promptTraces.sort((left, right) => left.traceId.localeCompare(right.traceId)),
     searchTraces: searchTraces.sort((left, right) => left.traceId.localeCompare(right.traceId)),
     draftVersions: draftVersions.sort((left, right) => left.taskId.localeCompare(right.taskId) || left.documentKey.localeCompare(right.documentKey) || left.revision - right.revision || Number(left.current) - Number(right.current)),
-    critiqueScores: [],
+    critiqueScores,
     rejectedVariants: rejectedVariants.sort((left, right) => left.variantId.localeCompare(right.variantId)),
     promotionRationale: promotion,
     diagnostics: normalizedDiagnostics,
@@ -895,6 +1098,11 @@ function formatDiagnostics(diagnostics: LineageDiagnostic[]): string {
 function buildLineageScoringLogMarkdown(result: CounterLawsuitLineageScoringLogResult): string {
   const manifest = buildLineageScoringLogManifest(result);
   const stageRows = result.stageTraces.map((stage) => `| ${escapeCell(stage.workflowStage)} | ${escapeCell(stage.taskId)} | ${escapeCell(stage.documentKey ?? "none")} | ${escapeCell(stage.status)} |`).join("\n");
+  const promptRows = result.promptTraces.map((trace) => `| ${escapeCell(trace.sourceType)} | ${escapeCell(trace.taskId ?? trace.workflowStepId ?? "workflow")} | ${escapeCell(trace.documentKey ?? trace.workflowStepName ?? "none")} | ${escapeCell(trace.contentHash)} | ${escapeCell(trace.safetyGateRefs.join(", ") || "none")} | ${escapeCell(trace.excerpt)} |`).join("\n");
+  const searchRows = result.searchTraces.map((trace) => `| ${escapeCell(trace.sourceDocumentKey ?? "unknown")} | ${escapeCell(trace.query ?? "none")} | ${escapeCell(trace.sourcePath ?? "none")} | ${escapeCell(trace.receiptIds.join(", ") || "none")} | ${escapeCell(trace.authorityRecordIds.join(", ") || "none")} | ${escapeCell(trace.providerName ?? trace.sourceSystem ?? "unknown")} |`).join("\n");
+  const draftRows = result.draftVersions.map((draft) => `| ${escapeCell(draft.documentKey)} | ${escapeCell(draft.taskId)} | ${draft.revision} | ${draft.current ? "current" : "prior"} | ${escapeCell(draft.status ?? "unknown")} | ${escapeCell(draft.contentHash)} |`).join("\n");
+  const scoreRows = result.critiqueScores.map((score) => `| ${escapeCell(score.label)} | ${score.value}/${score.maxValue} | ${escapeCell(score.sourceDocumentKeys.join(", ") || "none")} | ${escapeCell(score.explanation)} |`).join("\n");
+  const rejectedRows = result.rejectedVariants.map((variant) => `| ${escapeCell(variant.variantId)} | ${escapeCell(variant.sourceDocumentKey ?? "unknown")} | ${variant.revision ?? ""} | ${escapeCell(variant.reason)} | preserved |`).join("\n");
   const sourceRows = result.sourceDocuments.map((source) => `| ${escapeCell(source.documentKey)} | ${escapeCell(source.taskId)} | ${escapeCell(source.workflowStage ?? "unknown")} | ${source.revision ?? ""} | ${escapeCell(source.parsedFrom)} | ${escapeCell(source.status ?? "unknown")} | ${escapeCell(source.contentHash ?? "missing")} |`).join("\n");
   return `# Lineage and scoring log
 
@@ -914,7 +1122,7 @@ This log preserves workflow lineage and diagnostic scoring only. It does not ver
 - Status document key: ${result.statusDocumentKey ?? LINEAGE_SCORING_LOG_STATUS_DOCUMENT_KEY}
 - Promotion decision: ${result.promotionRationale.decision}
 
-## Stage lineage
+## Stage/task lineage
 
 | Stage | Task ID | Document key | Task status |
 | --- | --- | --- | --- |
@@ -925,6 +1133,46 @@ ${stageRows || "| none | none | none | unknown |"}
 | Document key | Task ID | Stage | Revision | Parsed from | Status | Content hash |
 | --- | --- | --- | --- | --- | --- | --- |
 ${sourceRows || "| none | none | unknown |  | missing | unknown | missing |"}
+
+## Prompt lineage
+
+| Source | Task or step | Document or step name | Hash | Safety gates | Bounded redacted text |
+| --- | --- | --- | --- | --- | --- |
+${promptRows || "| none | none | none | none | none | none |"}
+
+## Search lineage
+
+| Document | Query or candidate | Source path or URL | Receipt IDs | Authority record IDs | Provider/tool |
+| --- | --- | --- | --- | --- | --- |
+${searchRows || "| none | none | none | none | none | none |"}
+
+## Draft version ledger
+
+| Document key | Task ID | Revision | Current | Status | Content hash |
+| --- | --- | --- | --- | --- | --- |
+${draftRows || "| none | none |  | none | unknown | none |"}
+
+## Critique score table
+
+| Diagnostic score | Value | Source documents | Explanation |
+| --- | --- | --- | --- |
+${scoreRows || "| none | 0/1 | none | No critique scores were produced. |"}
+
+## Rejected variants
+
+| Variant ID | Source document | Revision | Reason | History preserved |
+| --- | --- | --- | --- | --- |
+${rejectedRows || "| none | none |  | No rejected variants were identified. | preserved |"}
+
+## Promotion rationale
+
+- Decision: ${result.promotionRationale.decision}
+- Reasons: ${result.promotionRationale.reasons.join("; ")}
+- Human-review gates: ${result.promotionRationale.requiredHumanReview.join("; ")}
+
+## Unresolved blockers
+
+${result.promotionRationale.unresolvedBlockers.map((blocker) => `- ${blocker}`).join("\n") || "- None beyond the standing human-review and non-promotion gates."}
 
 ## Counts
 
@@ -939,7 +1187,7 @@ ${sourceRows || "| none | none | unknown |  | missing | unknown | missing |"}
 
 ${formatDiagnostics(result.diagnostics)}
 
-## Machine-readable JSON manifest
+## Safe JSON manifest
 
 \`\`\`json
 ${JSON.stringify(manifest, null, 2)}

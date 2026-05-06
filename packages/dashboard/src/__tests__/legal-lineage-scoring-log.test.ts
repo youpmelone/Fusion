@@ -6,6 +6,7 @@ import {
   LINEAGE_SCORING_LOG_STATUS_DOCUMENT_KEY,
   collectCounterLawsuitLineageScoringLogInputs,
   deriveLineageScoringLogStatusForRun,
+  generateCounterLawsuitLineageScoringLog,
 } from "../legal-lineage-scoring-log.js";
 
 function makeTask(input: Partial<Task> & { id: string; stage?: string; documentKey?: string }): Task {
@@ -116,11 +117,34 @@ function seedStageTasks(store: FakeLineageStore): void {
 
 function seedRequiredArtifacts(store: FakeLineageStore): void {
   const manifests = [
-    ["T1", "research-memo", { status: "completed", searches: [{ query: "retaliation elements", receiptIds: ["R-1"] }], evidence: [{ receiptId: "R-1", sourcePath: "vault/source.md", query: "retaliation elements" }] }],
-    ["T2", "evidence-ledger", { status: "completed", sourceLinks: [{ receiptId: "R-1", sourcePath: "vault/source.md" }] }],
-    ["T3", "claim-map", { status: "completed", claims: [{ claimId: "CL-1" }] }],
-    ["T4", "draft-counter-lawsuit-complaint", { status: "completed", paragraphs: [{ paragraphId: "P-1" }] }],
-    ["T5", "red-team-report", { status: "completed", findings: [{ findingId: "F-1", severity: "warning" }] }],
+    ["T1", "research-memo", {
+      status: "completed",
+      searches: [{ query: "retaliation elements", receiptIds: ["R-1"], providerName: "qmd", toolName: "search" }],
+      evidence: [{ receiptId: "R-1", sourcePath: "vault/source.md", query: "retaliation elements", providerName: "qmd", toolName: "search" }],
+      authorities: [{ recordId: "CLV-1", input: "Roe v Wade", status: "not-found", source: "courtlistener" }],
+    }],
+    ["T2", "evidence-ledger", {
+      status: "completed",
+      sourceLinks: [{ receiptId: "R-1", sourcePath: "vault/source.md" }],
+      citationStatuses: [{ citationStatusId: "CIT-1", status: "needs-human-citation-verification", humanVerificationRequired: true }],
+    }],
+    ["T3", "claim-map", {
+      status: "partial",
+      claims: [{ claimId: "CL-1", missingProofIds: ["MP-1"], unresolvedDraftOnly: true }],
+      missingProof: [{ missingProofId: "MP-1", severity: "warning", unresolved: true, reason: "needs source support" }],
+    }],
+    ["T4", "draft-counter-lawsuit-complaint", {
+      status: "partial",
+      paragraphs: [{ paragraphId: "P-1", status: "blocked", sourcePaths: [], receiptIds: [], unresolvedDraftOnly: true }],
+      claimDrafts: [{ claimDraftId: "CD-1", sourcePaths: [], missingProofIds: ["MP-1"], unresolvedDraftOnly: true }],
+    }],
+    ["T5", "red-team-report", {
+      status: "partial",
+      findings: [{ findingId: "F-1", severity: "warning" }],
+      mtdAttacks: [{ attackId: "MTD-1", severity: "high" }],
+      citationIssues: [{ issueId: "CI-1", severity: "warning", humanVerificationRequired: true }],
+      revisionRecommendations: [{ recommendationId: "RR-1", summary: "Narrow or remove unsupported text" }],
+    }],
   ] as const;
   for (const [taskId, key, metadata] of manifests) {
     store.addDoc(makeDoc({ taskId, key, metadata, content: `# ${key}\n\nSafe content for ${key}.` }));
@@ -241,7 +265,7 @@ describe("legal lineage/scoring log service", () => {
       expect.objectContaining({ taskId: "T4", documentKey: "draft-counter-lawsuit-complaint", current: true, contentHash: expect.stringMatching(/^[a-f0-9]{64}$/) }),
       expect.objectContaining({ taskId: "T4", documentKey: "draft-counter-lawsuit-complaint", current: false, revision: 1 }),
     ]));
-    expect(result.rejectedVariants).toEqual([expect.objectContaining({ sourceTaskId: "T4", sourceDocumentKey: "draft-counter-lawsuit-complaint", preserved: true })]);
+    expect(result.rejectedVariants).toEqual(expect.arrayContaining([expect.objectContaining({ sourceTaskId: "T4", sourceDocumentKey: "draft-counter-lawsuit-complaint", preserved: true })]));
   });
 
   it("captures workflow-step prompt traces and search traces without accepting request-provided lineage", async () => {
@@ -299,5 +323,59 @@ describe("legal lineage/scoring log service", () => {
     const result = await collectCounterLawsuitLineageScoringLogInputs({ taskStore: store, runId: "RUN-1" });
     expect(result.status).toBe("blocked");
     expect(result.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: "missing-upstream-artifact", sourceDocumentKey: "red-team-report" })]));
+  });
+
+  it("builds deterministic critique scores, rejected variants, and a non-promotional rationale", async () => {
+    const store = new FakeLineageStore();
+    seedStageTasks(store);
+    seedRequiredArtifacts(store);
+    const result = await collectCounterLawsuitLineageScoringLogInputs({ taskStore: store, runId: "RUN-1" });
+    expect(result.critiqueScores.map((score) => score.scoreId)).toEqual([
+      "authority-resolution-gaps",
+      "citation-human-review-needs",
+      "complaint-draft-support-gaps",
+      "malformed-or-stale-manifests",
+      "red-team-risk-pressure",
+      "source-link-completeness-gaps",
+      "unresolved-blockers",
+    ]);
+    expect(result.critiqueScores).toEqual(expect.arrayContaining([
+      expect.objectContaining({ scoreId: "authority-resolution-gaps", value: 1 }),
+      expect.objectContaining({ scoreId: "citation-human-review-needs", value: 3 }),
+      expect.objectContaining({ scoreId: "red-team-risk-pressure", value: expect.any(Number) }),
+    ]));
+    expect(result.rejectedVariants).toEqual(expect.arrayContaining([
+      expect.objectContaining({ variantId: expect.stringContaining("unsupported-paragraph"), sourceDocumentKey: "draft-counter-lawsuit-complaint" }),
+      expect.objectContaining({ variantId: expect.stringContaining("unsupported-claim-draft") }),
+      expect.objectContaining({ variantId: expect.stringContaining("red-team-recommendation"), sourceDocumentKey: "red-team-report" }),
+    ]));
+    expect(result.promotionRationale.decision).toBe("not-promoted");
+    expect(result.promotionRationale.reasons.join(" ")).toContain("No generated artifact is promoted");
+  });
+
+  it("writes primary and status documents with the required markdown sections when upstream status is blocked", async () => {
+    const store = new FakeLineageStore();
+    seedStageTasks(store);
+    seedRequiredArtifacts(store);
+    seedWorkflowStep(store);
+    store.addDoc(makeDoc({ taskId: "T1", key: "counter-lawsuit-run", content: "Run prompt Authorization: Bearer abcdefghijklmnopqrstuvwxyz" }));
+    store.addDoc(makeDoc({ taskId: "T6", key: "counter-lawsuit-stage", content: "Stage prompt with lineage and citation safety gates" }));
+    store.addDoc(makeDoc({ taskId: "T5", key: "red-team-report-status", metadata: { status: "blocked", diagnostics: [{ code: "red-team-blocker", severity: "error", message: "blocked" }] } }));
+    const result = await generateCounterLawsuitLineageScoringLog({ taskStore: store, runId: "RUN-1", now: () => new Date("2026-05-06T02:00:00.000Z") });
+    expect(result.status).toBe("blocked");
+    expect(store.upserts.map((upsert) => upsert.input.key)).toEqual([LINEAGE_SCORING_LOG_DOCUMENT_KEY, LINEAGE_SCORING_LOG_STATUS_DOCUMENT_KEY]);
+    const primary = store.upserts.find((upsert) => upsert.input.key === LINEAGE_SCORING_LOG_DOCUMENT_KEY);
+    expect(primary?.taskId).toBe("T6");
+    expect(primary?.input.content).toContain("## Prompt lineage");
+    expect(primary?.input.content).toContain("## Search lineage");
+    expect(primary?.input.content).toContain("## Draft version ledger");
+    expect(primary?.input.content).toContain("## Critique score table");
+    expect(primary?.input.content).toContain("## Rejected variants");
+    expect(primary?.input.content).toContain("## Promotion rationale");
+    expect(primary?.input.content).toContain("## Safe JSON manifest");
+    expect(primary?.input.content).not.toContain("abcdefghijklmnopqrstuvwxyz");
+    expect(primary?.input.metadata).toEqual(expect.objectContaining({ status: "blocked", counts: expect.objectContaining({ promptTraces: expect.any(Number), critiqueScores: 7 }) }));
+    const status = store.upserts.find((upsert) => upsert.input.key === LINEAGE_SCORING_LOG_STATUS_DOCUMENT_KEY);
+    expect(status?.input.metadata).toEqual(expect.objectContaining({ status: "blocked", promotionDecision: "not-promoted", unresolvedBlockerCount: expect.any(Number) }));
   });
 });
