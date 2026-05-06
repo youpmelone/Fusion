@@ -312,8 +312,15 @@ describe("PlanningModeModal", () => {
         expect(screen.getByText("What is the scope?")).toBeDefined();
       });
 
-      fireEvent.click(screen.getByText("Small"));
-      fireEvent.click(screen.getByText("Continue"));
+      const smallOption = screen.getByRole("radio", { name: "Small" }) as HTMLInputElement;
+      fireEvent.click(smallOption);
+
+      await waitFor(() => {
+        expect(smallOption.checked).toBe(true);
+        expect(screen.getByRole("button", { name: "Continue" }).hasAttribute("disabled")).toBe(false);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
       await waitFor(() => {
         expect(mockRespondToPlanning).toHaveBeenCalledWith(

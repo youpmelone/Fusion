@@ -133,6 +133,21 @@ The response keeps the FN-001 dashboard contract and adds orchestration details:
     diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string; claimId?: string; elementId?: string; allegationId?: string; paragraphId?: string }>;
     safetyNotice: string;
   };
+  redTeamReport: {
+    runId: string;
+    status: "completed" | "partial" | "blocked" | "failed" | "stale" | "not-run";
+    redTeamReportDocumentKey?: "red-team-report";
+    statusDocumentKey?: "red-team-report-status";
+    findingCount: number;
+    mtdAttackCount: number;
+    citationIssueCount: number;
+    revisionRecommendationCount: number;
+    unresolvedBlockerCount: number;
+    reviewedParagraphCount: number;
+    reviewedClaimCount: number;
+    diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string; paragraphId?: string; claimDraftId?: string; findingId?: string }>;
+    safetyNotice: string;
+  };
 }
 ```
 
@@ -151,6 +166,10 @@ After evidence ledger generation is attempted, Fusion generates the structured `
 After claim-map generation is attempted, Fusion generates the deterministic `draft-counter-lawsuit-complaint` task document on the draft-complaint stage task. The draft complaint is built only from the persisted `claim-map` and `claim-map-status` documents. API callers cannot submit pleading text, legal theories, parties, jurisdiction, venue, damages, requested relief, source manifests, source paths, CourtListener records, external commands, tokens, headers, or raw fetch options from the request body.
 
 Complaint draft generation is best-effort during launch. A draft failure does not roll back the workflow run; the launch response returns `draftComplaint.status: "failed"`, `"blocked"`, or `"partial"` with diagnostics, and the retry endpoint can regenerate from the persisted prerequisite documents.
+
+After draft complaint generation is attempted, Fusion generates the deterministic `red-team-report` task document on the opposing-counsel red-team stage task. The report is built only from persisted `draft-counter-lawsuit-complaint`, `draft-counter-lawsuit-complaint-status`, `claim-map`, and `claim-map-status` documents. API callers cannot submit report text, attack categories, defenses, legal theories, source paths, confidence scores, citation records, revision text, external commands, CourtListener tokens, headers, or raw fetch options from the request body.
+
+Red-team report generation is best-effort during launch. A report failure does not roll back the workflow run; the launch response returns `redTeamReport.status: "failed"`, `"blocked"`, `"partial"`, or `"stale"` with diagnostics, and the retry endpoint can regenerate from the persisted prerequisite documents. Older runs that predate the red-team stage return `redTeamReport.status: "not-run"`.
 
 ## Vault-mining MCP setup
 
@@ -311,6 +330,34 @@ Unknown fields return `400`. Unknown run IDs return `404`.
 
 The response shape is the same `draftComplaint` summary returned by launch and status. `force: true` asks Fusion to regenerate from persisted claim-map documents, but it still does not accept generated complaint text, pleading sections, legal theories, parties, jurisdiction, venue, relief, source manifests, source paths, CourtListener records, external commands, tokens, headers, or raw fetch options from the request body.
 
+## Red-team report retry API
+
+Generate or retry the opposing-counsel red-team report for an existing run with:
+
+```http
+POST /api/legal-workflows/counter-lawsuit/runs/:runId/red-team-report
+```
+
+The request body accepts only:
+
+```ts
+{
+  force?: boolean;
+}
+```
+
+Unknown fields return `400`. Unknown run IDs return `404`.
+
+The response shape is the same `redTeamReport` summary returned by launch and status. `force: true` asks Fusion to regenerate from persisted complaint and claim-map documents, but it still does not accept report text, attack categories, defenses, legal theories, revision text, source paths, confidence scores, CourtListener records, external commands, tokens, headers, or raw fetch options from the request body.
+
+Red-team retry is deterministic and prerequisite-driven:
+
+- `blocked` means a reviewable draft complaint or required manifest is missing, malformed, or already blocked upstream.
+- `partial` means Fusion produced a report but unresolved findings, citation/source issues, missing proof, placeholder pleading fields, or human verification requirements remain.
+- `stale` means a companion status document or upstream status says the primary report cannot be treated as current completed critique.
+- `failed` means report generation itself failed; diagnostics are redacted and bounded.
+- `completed` still means draft-only issue spotting, not legal advice, legal verification, good-law review, citation-format validation, attorney review, or filing readiness.
+
 ## Status API
 
 Fetch derived run status with:
@@ -319,7 +366,7 @@ Fetch derived run status with:
 GET /api/legal-workflows/counter-lawsuit/runs/:runId
 ```
 
-The status endpoint finds tasks whose `sourceMetadata.workflowRunId` matches the run ID. It returns the stage task statuses, artifact keys, safety gates, source scope status, lineage document references, the current vault-mining summary, the current CourtListener authority-validation summary, the current research memo summary, the current evidence ledger summary, the current claim-map summary, and the current draft complaint summary.
+The status endpoint finds tasks whose `sourceMetadata.workflowRunId` matches the run ID. It returns the stage task statuses, artifact keys, safety gates, source scope status, lineage document references, the current vault-mining summary, the current CourtListener authority-validation summary, the current research memo summary, the current evidence ledger summary, the current claim-map summary, the current draft complaint summary, and the current red-team report summary.
 
 The `authorityValidation` status includes the research run ID, candidate count, matched count, unmatched/ambiguous/unavailable count, diagnostics, safety notice, and document key references for `courtlistener-authority-validation` and `courtlistener-status` when present.
 
@@ -330,6 +377,8 @@ The `evidenceLedger` status includes status, ledger document key, status documen
 The `claimMap` status includes status, claim-map document key, status document key when present, claim count, element count, allegation count, supporting-evidence count, missing-proof count, unresolved gap count, diagnostics, and safety notice. If `claim-map-status` reports blocked, partial, failed, stale, or unresolved prerequisites, status preserves that blocker instead of treating a stale primary claim map as completed support. Older runs without a claim-map stage return `claimMap.status: "not-run"` while preserving earlier summaries.
 
 The `draftComplaint` status includes status, draft complaint document key, status document key when present, section count, numbered paragraph count, claim-draft count, source-reference count, source-path count, missing-proof count, unresolved gap count, diagnostics, and safety notice. If `draft-counter-lawsuit-complaint-status` reports blocked, partial, failed, stale, or unresolved prerequisites, status preserves that blocker instead of treating a stale primary complaint document as completed support. Older runs without a draft-complaint stage return `draftComplaint.status: "not-run"` while preserving earlier summaries.
+
+The `redTeamReport` status includes status, red-team report document key, status document key when present, finding count, candidate MTD attack count, citation/source issue count, revision recommendation count, unresolved blocker count, reviewed paragraph count, reviewed claim count, diagnostics, and safety notice. If `red-team-report-status` reports blocked, partial, failed, stale, or unresolved prerequisites, status preserves that blocker instead of treating a stale primary report as completed critique. Older runs without a red-team stage return `redTeamReport.status: "not-run"` while preserving earlier summaries.
 
 Unknown run IDs return `404`.
 
@@ -363,6 +412,8 @@ After evidence ledger generation runs, the evidence-ledger task receives `eviden
 After claim-map generation runs, the claim-map task receives `claim-map`. When generation is blocked, partial, failed, or stale because of `evidence-ledger-status`, Fusion also writes `claim-map-status`. Complaint-drafting and later stages read `claim-map` when it exists and treat `claim-map-status` blockers as unresolved prerequisites, not support.
 
 After draft complaint generation runs, the draft-complaint task receives `draft-counter-lawsuit-complaint`. Fusion always rewrites this primary document when generation is attempted, even when blocked, so stale complaint text cannot be mistaken for current support. When generation is blocked, partial, failed, or stale because of `claim-map-status`, Fusion also writes `draft-counter-lawsuit-complaint-status`. FN-015 opposing-counsel red-team work should use these documents as its prerequisite input and treat any status blockers, missing-proof entries, red-team-pending marker, unresolved authorities, missing source paths, or human verification requirements as unresolved drafting risk, not as support.
+
+After red-team report generation runs, the red-team stage task receives `red-team-report`. Fusion always rewrites this primary document when generation is attempted, even when blocked, so stale red-team critique cannot be mistaken for current support. When generation is blocked, partial, failed, or stale because of `draft-counter-lawsuit-complaint-status` or `claim-map-status`, Fusion also writes `red-team-report-status`. FN-010 lineage/scoring work should read both documents, preserve unsupported findings, unlinked MTD risk rows, citation issue rows, revision recommendations, unresolved blockers, and status limitations, and avoid treating the report as reliable, filing-ready, promoted, or attorney verified.
 
 ## Vault-mining receipt schema
 
@@ -596,11 +647,68 @@ Missing claim maps, blocked `claim-map-status`, malformed manifests, missing sou
 
 The `draft-counter-lawsuit-complaint-status` document records blocked, partial, failed, or stale-blocker state with the same safe counts, diagnostics, document keys, filing blockers, missing-proof counts, and safety notice. A stale or malformed primary draft is not treated as completed.
 
-The complaint draft is draft-only and source-linked only. It is not legal advice, not verified fact support, not good-law verification, not citation-format validation, not filing-ready, not human verified, and not promoted for filing. It does not create the opposing-counsel red-team report, lineage/scoring log, final citation validation, good-law verification, attorney review, or filing workflow.
+The complaint draft is draft-only and source-linked only. It is not legal advice, not verified fact support, not good-law verification, not citation-format validation, not filing-ready, not human verified, and not promoted for filing. Launch then attempts the separate opposing-counsel red-team report from persisted documents only, but the complaint draft itself does not create the lineage/scoring log, final citation validation, good-law verification, attorney review, or filing workflow.
 
 Raw MCP payloads, full note bodies, CourtListener raw payloads, authorization headers, API tokens, token-like provider errors, and unbounded source text are not persisted in the complaint draft, complaint status, metadata, or API responses.
 
-FN-015 should start from the canonical `draft-counter-lawsuit-complaint` document key and its companion status document, then produce the opposing-counsel red-team report as a separate downstream artifact.
+The red-team stage starts from the canonical `draft-counter-lawsuit-complaint` document key and its companion status document, then produces the opposing-counsel red-team report as a separate downstream artifact.
+
+## Red-team report document schema
+
+The `red-team-report` task document contains Markdown for adversarial review plus a safe JSON manifest. The Markdown is an opposing-counsel critique only. It covers pleading weaknesses, candidate motion-to-dismiss risk categories, citation/source issue rows, paragraph and claim critique, revision recommendations, unresolved blockers, diagnostics, and the safety notice.
+
+The safe manifest uses this shape:
+
+```ts
+{
+  runId: string;
+  status: "completed" | "partial" | "blocked" | "failed" | "stale";
+  generatedAt: string;
+  sourceDocuments: Array<{ taskId: string; key: "claim-map" | "claim-map-status" | "draft-counter-lawsuit-complaint" | "draft-counter-lawsuit-complaint-status"; present: boolean; parsedFrom?: "metadata" | "json-block" | "missing" | "malformed"; status?: string }>;
+  claimMapTaskId?: string;
+  draftComplaintTaskId?: string;
+  redTeamTaskId?: string;
+  redTeamReportDocumentKey: "red-team-report";
+  statusDocumentKey?: "red-team-report-status";
+  findings: Array<{ findingId: string; category: string; severity: "info" | "warning" | "high" | "blocker"; summary: string; paragraphIds: string[]; claimDraftIds: string[]; missingProofIds: string[]; sourceReferenceIds: string[]; sourcePaths: string[]; receiptIds: string[]; authorityRecordIds: string[]; citationStatusIds: string[]; sourceTaskIds: string[]; unresolved: true }>;
+  mtdAttacks: Array<{ attackId: string; category: string; severity: "info" | "warning" | "high" | "blocker"; summary: string; paragraphIds: string[]; claimDraftIds: string[]; missingProofIds: string[]; sourceReferenceIds: string[]; sourcePaths: string[]; receiptIds: string[]; authorityRecordIds: string[]; citationStatusIds: string[]; sourceTaskIds: string[]; draftRiskOnly: true }>;
+  citationIssues: Array<{ issueId: string; severity: "info" | "warning" | "high" | "blocker"; summary: string; paragraphIds: string[]; claimDraftIds: string[]; sourceReferenceIds: string[]; sourcePaths: string[]; receiptIds: string[]; authorityRecordIds: string[]; citationStatusIds: string[]; humanVerificationRequired: true }>;
+  revisionRecommendations: Array<{ recommendationId: string; findingIds: string[]; summary: string; paragraphIds: string[]; claimDraftIds: string[]; missingProofIds: string[]; sourceReferenceIds: string[]; sourcePaths: string[]; receiptIds: string[]; authorityRecordIds: string[]; citationStatusIds: string[]; sourceTaskIds: string[]; unresolved: true }>;
+  diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string; paragraphId?: string; claimDraftId?: string; findingId?: string }>;
+  counts: { findings: number; mtdAttacks: number; citationIssues: number; revisionRecommendations: number; unresolvedBlockers: number; reviewedParagraphs: number; reviewedClaims: number; sourceReferences: number; sourcePaths: number };
+  safetyNotice: string;
+}
+```
+
+Red-team rows are generated from the complaint draft and claim-map documents, never from request-body legal theories or arguments. Candidate MTD attacks are draft risk categories only; they are not final motion practice decisions, defenses, legal advice, or attorney-reviewed arguments.
+
+Missing complaint drafts, blocked or stale `draft-counter-lawsuit-complaint-status`, malformed manifests, missing source paths, unsupported allegations, unresolved authorities, placeholder jurisdiction/venue/standing/relief/damages, and human citation/source verification needs remain visible as findings, citation issues, revision recommendations, diagnostics, blockers, or status entries.
+
+The `red-team-report-status` document records blocked, partial, failed, or stale-blocker state with the same safe counts, diagnostics, document keys, unresolved blocker counts, and safety notice. A stale or malformed primary report is not treated as completed critique. Its metadata and embedded JSON use this bounded status shape:
+
+```ts
+{
+  runId: string;
+  status: "completed" | "partial" | "blocked" | "failed" | "stale";
+  redTeamReportDocumentKey: "red-team-report";
+  statusDocumentKey: "red-team-report-status";
+  findingCount: number;
+  mtdAttackCount: number;
+  citationIssueCount: number;
+  revisionRecommendationCount: number;
+  unresolvedBlockerCount: number;
+  reviewedParagraphCount: number;
+  reviewedClaimCount: number;
+  diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string; sourceDocumentKey?: string; sourceTaskId?: string; paragraphId?: string; claimDraftId?: string; findingId?: string }>;
+  safetyNotice: string;
+}
+```
+
+The red-team report is draft-only and source-linked only. It is not legal advice, not verified fact support, not good-law verification, not citation-format validation, not filing-ready, not human verified, not promoted for filing, and not reliable support. It creates an opposing-counsel red-team report only; it does not create the lineage/scoring log, final citation validation, good-law verification, attorney review, real motion practice decisions, filing workflow, filing-ready pleading, or blocker resolution.
+
+Raw MCP payloads, full note bodies, CourtListener raw payloads, authorization headers, API tokens, token-like provider errors, and unbounded source text are not persisted in the red-team report, report status, metadata, or API responses.
+
+FN-010 is the downstream handoff for lineage/scoring. It should read `red-team-report` and `red-team-report-status`, preserve unresolved blockers and limitations, and must not treat any red-team finding, MTD row, citation issue, or recommendation as reliable support, filing readiness, human verification, or promoted output.
 
 ## Agents and Codex legal skills
 
@@ -616,11 +724,11 @@ Every generated stage task enables three prompt-mode pre-merge workflow steps:
 - Opposing-counsel red-team review
 - Lineage preservation
 
-The citation/source prompt checks `research-memo` for source-linked evidence, matched authorities when used as support, unresolved gaps, and lineage. It checks `research-memo-status` for unresolved blockers. It checks `evidence-ledger` for source-linked fact rows, preliminary claim links, confidence labels, citation status, unresolved gaps, and absence of positive promotion or filing-ready claims. It checks `evidence-ledger-status` for blocked, partial, failed, stale, or unresolved prerequisites. It checks `claim-map` for claim groups, element rows, allegation-to-evidence links, missing-proof entries, unresolved authority gaps, and absence of positive promotion or filing-ready claims. It checks `claim-map-status` for blocked, partial, failed, stale, or unresolved prerequisites. It checks `draft-counter-lawsuit-complaint` for draft complaint paragraphs, source references, missing-proof blockers, unresolved authorities, red-team-pending labels, and absence of promoted or filing-ready language. It checks `draft-counter-lawsuit-complaint-status` for blocked, partial, failed, stale, or unresolved prerequisites. It also checks `courtlistener-authority-validation` when legal authorities are cited and the document exists.
+The citation/source prompt checks `research-memo` for source-linked evidence, matched authorities when used as support, unresolved gaps, and lineage. It checks `research-memo-status` for unresolved blockers. It checks `evidence-ledger` for source-linked fact rows, preliminary claim links, confidence labels, citation status, unresolved gaps, and absence of positive promotion or filing-ready claims. It checks `evidence-ledger-status` for blocked, partial, failed, stale, or unresolved prerequisites. It checks `claim-map` for claim groups, element rows, allegation-to-evidence links, missing-proof entries, unresolved authority gaps, and absence of positive promotion or filing-ready claims. It checks `claim-map-status` for blocked, partial, failed, stale, or unresolved prerequisites. It checks `draft-counter-lawsuit-complaint` for draft complaint paragraphs, source references, missing-proof blockers, unresolved authorities, red-team-pending labels, and absence of promoted or filing-ready language. It checks `draft-counter-lawsuit-complaint-status` for blocked, partial, failed, stale, or unresolved prerequisites. It checks `red-team-report` for unsupported findings, unlinked candidate MTD attack rows, citation issue rows, revision recommendations, unresolved blockers, and absence of promoted, reliable, or filing-ready language. It checks `red-team-report-status` for blocked, partial, failed, stale, or unresolved prerequisites. It also checks `courtlistener-authority-validation` when legal authorities are cited and the document exists.
 
-It requires `REQUEST REVISION` when an authority is used as support without a matched CourtListener record, or when missing, unmatched, ambiguous, or unavailable CourtListener results are presented as support. It also requires revision when draft complaint paragraphs, source references, missing-proof blockers, unresolved authorities, or red-team-pending labels are omitted from the safety review. Explicitly labeled unverified authority notes may remain only as unresolved research gaps; they do not satisfy the completion gate as support.
+It requires `REQUEST REVISION` when an authority is used as support without a matched CourtListener record, or when missing, unmatched, ambiguous, or unavailable CourtListener results are presented as support. It also requires revision when draft complaint paragraphs, source references, missing-proof blockers, unresolved authorities, red-team-pending labels, unsupported red-team findings, unlinked MTD attack rows, citation issue rows, revision recommendations, or red-team blockers are omitted from the safety review. Explicitly labeled unverified authority notes may remain only as unresolved research gaps; they do not satisfy the completion gate as support.
 
-The opposing-counsel red-team prompt treats `draft-counter-lawsuit-complaint` as the artifact to attack and checks `draft-counter-lawsuit-complaint-status` before passing. It does not generate the FN-015 report in this task; it prevents downstream completion from treating the draft complaint as promoted, reliable, verified, good-law checked, citation-format validated, human verified, or filing-ready.
+The opposing-counsel red-team prompt requires `red-team-report` to attack `draft-counter-lawsuit-complaint` before passing. It checks `draft-counter-lawsuit-complaint-status` and `red-team-report-status` for unresolved blockers, and it requires pleading weaknesses, candidate MTD attack rows, citation/source issue rows, unresolved blockers, placeholder pleading field risks, and conservative revision recommendations. It prevents downstream completion from treating the draft complaint or red-team report as promoted, reliable, verified, good-law checked, citation-format validated, human verified, legal advice, or filing-ready.
 
 ## Optional source scope behavior
 
@@ -632,8 +740,8 @@ When no `vaultScope`, `sourceScope`, or `sourceQuery` is supplied, the run recor
 
 ## Integration boundaries
 
-This workflow now mines QMD MCP and Obsidian MCP for source-linked local receipts, uses CourtListener for bounded authority lookup when candidates are available, generates a source-linked draft research memo from those persisted manifests, generates a structured evidence ledger from the persisted memo documents, generates a structured claim map from the persisted evidence ledger documents, and generates a deterministic draft complaint scaffold from the persisted claim-map documents.
+This workflow now mines QMD MCP and Obsidian MCP for source-linked local receipts, uses CourtListener for bounded authority lookup when candidates are available, generates a source-linked draft research memo from those persisted manifests, generates a structured evidence ledger from the persisted memo documents, generates a structured claim map from the persisted evidence ledger documents, generates a deterministic draft complaint scaffold from the persisted claim-map documents, and generates an opposing-counsel red-team report from persisted complaint and claim-map documents.
 
 CourtListener can confirm that a citation or query maps to a CourtListener record or candidate match. It does not Shepardize, determine good-law status, verify legal conclusions, check final filing citation format, decide filing readiness, generate filings, or replace attorney judgment.
 
-Stage prompts instruct agents to use integrations when available and to mark unavailable integration results as unverified. Outputs, mined receipts, authority-validation records, generated research memos, generated evidence ledgers, generated claim maps, and generated complaint drafts are drafts or source manifests only. They are source-linked only, not legal advice, not verified facts, not good-law verification, not citation-format validation, not filing-ready, not human verification, and not promoted for filing. FN-015 is the downstream handoff for the opposing-counsel red-team report; FN-010 remains the downstream handoff for lineage/scoring work.
+Stage prompts instruct agents to use integrations when available and to mark unavailable integration results as unverified. Outputs, mined receipts, authority-validation records, generated research memos, generated evidence ledgers, generated claim maps, generated complaint drafts, and generated red-team reports are drafts or source manifests only. They are source-linked only, not legal advice, not verified facts, not verified fact support, not good-law verification, not citation-format validation, not filing-ready, not human verification, not promoted for filing, and not reliable support. FN-010 remains the downstream handoff for lineage/scoring work.

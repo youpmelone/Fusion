@@ -71,7 +71,14 @@ describe("CounterLawsuitWorkflowView", () => {
         matterName: "Acme response matter",
         focus: "Retaliation timeline",
         vaultScope: "vault/acme",
-        requestedArtifacts: ["research-memo", "evidence-ledger", "claim-map", "draft-counter-lawsuit-complaint", "red-team-report", "lineage-scoring-log"],
+        requestedArtifacts: [
+          "research-memo",
+          "evidence-ledger",
+          "claim-map",
+          "draft-counter-lawsuit-complaint",
+          "red-team-report",
+          "lineage-scoring-log",
+        ],
         safeguards: {
           citationSourceVerification: true,
           opposingCounselRedTeam: true,
@@ -114,6 +121,7 @@ describe("CounterLawsuitWorkflowView", () => {
       artifacts: [
         { id: "claim-map", label: "Claim map", status: "queued" },
         { id: "draft-counter-lawsuit-complaint", label: "Draft counter-lawsuit complaint", status: "pending" },
+        { id: "red-team-report", label: "Opposing-counsel red-team report", status: "pending" },
       ],
     });
 
@@ -128,6 +136,7 @@ describe("CounterLawsuitWorkflowView", () => {
     const returnedArtifacts = screen.getByRole("list", { name: "Returned artifacts" });
     expect(within(returnedArtifacts).getByText("Claim map")).toBeInTheDocument();
     expect(within(returnedArtifacts).getByText("Draft counter-lawsuit complaint")).toBeInTheDocument();
+    expect(within(returnedArtifacts).getByText("Opposing-counsel red-team report")).toBeInTheDocument();
   });
 
   it("shows a friendly error when the backend endpoint is not installed yet", async () => {

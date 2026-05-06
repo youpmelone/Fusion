@@ -6,6 +6,7 @@ import {
   runCounterLawsuitPrototypeDraftComplaint,
   runCounterLawsuitPrototypeEvidenceLedger,
   runCounterLawsuitPrototypeResearchMemo,
+  runCounterLawsuitPrototypeRedTeamReport,
   runCounterLawsuitPrototypeVaultMining,
   startCounterLawsuitPrototypeWorkflow,
   type StartCounterLawsuitPrototypeWorkflowInput,
@@ -45,6 +46,7 @@ describe("legal workflow API helpers", () => {
           evidenceLedger: { runId: "LWR-1", status: "blocked", factCount: 1, sourceLinkCount: 0, claimLinkCount: 1, unresolvedGapCount: 1, citationStatusCounts: { "source-linked-local-evidence": 0, "matched-courtlistener-lookup-record": 0, "unresolved-authority-lookup-record": 0, "missing-source-link": 1, "needs-human-citation-verification": 1 }, confidenceCounts: { high: 0, medium: 0, low: 0, unsupported: 1 }, diagnostics: [], safetyNotice: "draft-only ledger" },
           claimMap: { runId: "LWR-1", status: "blocked", claimCount: 1, elementCount: 1, allegationCount: 0, supportingEvidenceCount: 0, missingProofCount: 1, unresolvedGapCount: 1, diagnostics: [], safetyNotice: "draft-only claim map" },
           draftComplaint: { runId: "LWR-1", status: "blocked", draftComplaintDocumentKey: "draft-counter-lawsuit-complaint", sectionCount: 10, paragraphCount: 0, claimDraftCount: 0, sourceReferenceCount: 0, sourcePathCount: 0, missingProofCount: 1, unresolvedGapCount: 1, diagnostics: [], safetyNotice: "draft-only complaint" },
+          redTeamReport: { runId: "LWR-1", status: "blocked", redTeamReportDocumentKey: "red-team-report", statusDocumentKey: "red-team-report-status", findingCount: 1, mtdAttackCount: 1, citationIssueCount: 1, revisionRecommendationCount: 1, unresolvedBlockerCount: 1, reviewedParagraphCount: 0, reviewedClaimCount: 0, diagnostics: [], safetyNotice: "draft-only red-team report" },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -59,6 +61,8 @@ describe("legal workflow API helpers", () => {
     expect(response.evidenceLedger?.status).toBe("blocked");
     expect(response.claimMap?.status).toBe("blocked");
     expect(response.draftComplaint?.status).toBe("blocked");
+    expect(response.redTeamReport?.status).toBe("blocked");
+    expect(response.redTeamReport?.redTeamReportDocumentKey).toBe("red-team-report");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs?projectId=proj%2Flegal%2Bworkflow");
@@ -90,6 +94,7 @@ describe("legal workflow API helpers", () => {
           evidenceLedger: { runId: "CLW-1", status: "not-run", factCount: 0, sourceLinkCount: 0, claimLinkCount: 0, unresolvedGapCount: 0, citationStatusCounts: { "source-linked-local-evidence": 0, "matched-courtlistener-lookup-record": 0, "unresolved-authority-lookup-record": 0, "missing-source-link": 0, "needs-human-citation-verification": 0 }, confidenceCounts: { high: 0, medium: 0, low: 0, unsupported: 0 }, diagnostics: [], safetyNotice: "draft-only ledger" },
           claimMap: { runId: "CLW-1", status: "not-run", claimCount: 0, elementCount: 0, allegationCount: 0, supportingEvidenceCount: 0, missingProofCount: 0, unresolvedGapCount: 0, diagnostics: [], safetyNotice: "draft-only claim map" },
           draftComplaint: { runId: "CLW-1", status: "not-run", sectionCount: 0, paragraphCount: 0, claimDraftCount: 0, sourceReferenceCount: 0, sourcePathCount: 0, missingProofCount: 0, unresolvedGapCount: 0, diagnostics: [], safetyNotice: "draft-only complaint" },
+          redTeamReport: { runId: "CLW-1", status: "not-run", findingCount: 0, mtdAttackCount: 0, citationIssueCount: 0, revisionRecommendationCount: 0, unresolvedBlockerCount: 0, reviewedParagraphCount: 0, reviewedClaimCount: 0, diagnostics: [], safetyNotice: "draft-only red-team report" },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -104,6 +109,7 @@ describe("legal workflow API helpers", () => {
     expect(response.evidenceLedger?.status).toBe("not-run");
     expect(response.claimMap?.status).toBe("not-run");
     expect(response.draftComplaint?.status).toBe("not-run");
+    expect(response.redTeamReport?.status).toBe("not-run");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs/CLW%2F1?projectId=proj%2Flegal%2Bworkflow");
@@ -295,6 +301,40 @@ it("retries counter-lawsuit draft complaint generation with project scoping", as
   expect(fetchMock).toHaveBeenCalledTimes(1);
   const [url, init] = fetchMock.mock.calls[0];
   expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs/CLW%2F1/draft-counter-lawsuit-complaint?projectId=proj%2Flegal%2Bworkflow");
+  expect(init?.method).toBe("POST");
+  expect(JSON.parse(String(init?.body))).toEqual({ force: true });
+});
+
+it("retries counter-lawsuit red-team report generation with project scoping", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        runId: "CLW-1",
+        status: "partial",
+        redTeamReportDocumentKey: "red-team-report",
+        statusDocumentKey: "red-team-report-status",
+        findingCount: 2,
+        mtdAttackCount: 1,
+        citationIssueCount: 1,
+        revisionRecommendationCount: 2,
+        unresolvedBlockerCount: 1,
+        reviewedParagraphCount: 3,
+        reviewedClaimCount: 1,
+        diagnostics: [],
+        safetyNotice: "draft-only red-team report, not filing-ready, not reliable support",
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ),
+  );
+
+  const response = await runCounterLawsuitPrototypeRedTeamReport("CLW/1", { force: true }, "proj/legal+workflow");
+
+  expect(response.redTeamReportDocumentKey).toBe("red-team-report");
+  expect(response.mtdAttackCount).toBe(1);
+  expect(response.safetyNotice).toContain("not reliable support");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const [url, init] = fetchMock.mock.calls[0];
+  expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs/CLW%2F1/red-team-report?projectId=proj%2Flegal%2Bworkflow");
   expect(init?.method).toBe("POST");
   expect(JSON.parse(String(init?.body))).toEqual({ force: true });
 });
