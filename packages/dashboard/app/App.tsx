@@ -878,7 +878,7 @@ function AppInner() {
               tasks: isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks,
               workflowSteps,
               openTaskDetail: isMobile
-                ? (task: Task | TaskDetail, initialTab?: DetailTaskTab) => openDetailTaskWithHistory(task, initialTab)
+                ? (task: Task | TaskDetail, initialTab?: DetailTaskTab) => openDetailTask(task, initialTab)
                 : (task: Task | TaskDetail, initialTab?: DetailTaskTab) => modalManager.openDetailTask(task, initialTab),
               renderTaskCard: (task: Task | TaskDetail) => (
                 <TaskCard
