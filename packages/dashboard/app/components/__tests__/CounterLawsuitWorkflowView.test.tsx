@@ -67,7 +67,7 @@ describe("CounterLawsuitWorkflowView", () => {
         matterName: "Acme response matter",
         focus: "Retaliation timeline",
         vaultScope: "vault/acme",
-        requestedArtifacts: ["claim-map", "source-lineage", "risk-red-team", "draft-response"],
+        requestedArtifacts: ["claim-map", "draft-counter-lawsuit-complaint", "source-lineage", "risk-red-team"],
         safeguards: {
           citationSourceVerification: true,
           opposingCounselRedTeam: true,

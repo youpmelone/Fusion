@@ -3,6 +3,7 @@ import {
   fetchCounterLawsuitPrototypeWorkflowRunStatus,
   runCounterLawsuitPrototypeAuthorityValidation,
   runCounterLawsuitPrototypeClaimMap,
+  runCounterLawsuitPrototypeDraftComplaint,
   runCounterLawsuitPrototypeEvidenceLedger,
   runCounterLawsuitPrototypeResearchMemo,
   runCounterLawsuitPrototypeVaultMining,
@@ -19,7 +20,7 @@ const input: StartCounterLawsuitPrototypeWorkflowInput = {
   matterName: "Acme response matter",
   focus: "Retaliatory claims and filing timeline",
   vaultScope: "client/acme/litigation",
-  requestedArtifacts: ["claim-map", "evidence-lineage", "draft-response"],
+  requestedArtifacts: ["claim-map", "evidence-lineage", "draft-counter-lawsuit-complaint"],
   safeguards: {
     citationSourceVerification: true,
     opposingCounselRedTeam: true,
@@ -43,6 +44,7 @@ describe("legal workflow API helpers", () => {
           researchMemo: { runId: "LWR-1", status: "blocked", evidenceCount: 0, authorityCount: 0, conclusionCount: 2, sourcePathCount: 0, diagnostics: [], safetyNotice: "draft-only" },
           evidenceLedger: { runId: "LWR-1", status: "blocked", factCount: 1, sourceLinkCount: 0, claimLinkCount: 1, unresolvedGapCount: 1, citationStatusCounts: { "source-linked-local-evidence": 0, "matched-courtlistener-lookup-record": 0, "unresolved-authority-lookup-record": 0, "missing-source-link": 1, "needs-human-citation-verification": 1 }, confidenceCounts: { high: 0, medium: 0, low: 0, unsupported: 1 }, diagnostics: [], safetyNotice: "draft-only ledger" },
           claimMap: { runId: "LWR-1", status: "blocked", claimCount: 1, elementCount: 1, allegationCount: 0, supportingEvidenceCount: 0, missingProofCount: 1, unresolvedGapCount: 1, diagnostics: [], safetyNotice: "draft-only claim map" },
+          draftComplaint: { runId: "LWR-1", status: "blocked", sectionCount: 0, paragraphCount: 0, claimDraftCount: 0, sourceReferenceCount: 0, sourcePathCount: 0, missingProofCount: 1, unresolvedGapCount: 1, diagnostics: [], safetyNotice: "draft-only complaint" },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -56,6 +58,7 @@ describe("legal workflow API helpers", () => {
     expect(response.researchMemo?.status).toBe("blocked");
     expect(response.evidenceLedger?.status).toBe("blocked");
     expect(response.claimMap?.status).toBe("blocked");
+    expect(response.draftComplaint?.status).toBe("blocked");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs?projectId=proj%2Flegal%2Bworkflow");
@@ -86,6 +89,7 @@ describe("legal workflow API helpers", () => {
           researchMemo: { runId: "CLW-1", status: "not-run", evidenceCount: 0, authorityCount: 0, conclusionCount: 0, sourcePathCount: 0, diagnostics: [], safetyNotice: "draft-only" },
           evidenceLedger: { runId: "CLW-1", status: "not-run", factCount: 0, sourceLinkCount: 0, claimLinkCount: 0, unresolvedGapCount: 0, citationStatusCounts: { "source-linked-local-evidence": 0, "matched-courtlistener-lookup-record": 0, "unresolved-authority-lookup-record": 0, "missing-source-link": 0, "needs-human-citation-verification": 0 }, confidenceCounts: { high: 0, medium: 0, low: 0, unsupported: 0 }, diagnostics: [], safetyNotice: "draft-only ledger" },
           claimMap: { runId: "CLW-1", status: "not-run", claimCount: 0, elementCount: 0, allegationCount: 0, supportingEvidenceCount: 0, missingProofCount: 0, unresolvedGapCount: 0, diagnostics: [], safetyNotice: "draft-only claim map" },
+          draftComplaint: { runId: "CLW-1", status: "not-run", sectionCount: 0, paragraphCount: 0, claimDraftCount: 0, sourceReferenceCount: 0, sourcePathCount: 0, missingProofCount: 0, unresolvedGapCount: 0, diagnostics: [], safetyNotice: "draft-only complaint" },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -99,6 +103,7 @@ describe("legal workflow API helpers", () => {
     expect(response.researchMemo?.status).toBe("not-run");
     expect(response.evidenceLedger?.status).toBe("not-run");
     expect(response.claimMap?.status).toBe("not-run");
+    expect(response.draftComplaint?.status).toBe("not-run");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs/CLW%2F1?projectId=proj%2Flegal%2Bworkflow");
@@ -255,6 +260,40 @@ it("retries counter-lawsuit claim-map generation with project scoping", async ()
   expect(fetchMock).toHaveBeenCalledTimes(1);
   const [url, init] = fetchMock.mock.calls[0];
   expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs/CLW%2F1/claim-map?projectId=proj%2Flegal%2Bworkflow");
+  expect(init?.method).toBe("POST");
+  expect(JSON.parse(String(init?.body))).toEqual({ force: true });
+});
+
+
+it("retries counter-lawsuit draft complaint generation with project scoping", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        runId: "CLW-1",
+        status: "partial",
+        draftComplaintDocumentKey: "draft-counter-lawsuit-complaint",
+        statusDocumentKey: "draft-counter-lawsuit-complaint-status",
+        sectionCount: 10,
+        paragraphCount: 2,
+        claimDraftCount: 1,
+        sourceReferenceCount: 1,
+        sourcePathCount: 1,
+        missingProofCount: 1,
+        unresolvedGapCount: 1,
+        diagnostics: [],
+        safetyNotice: "draft-only complaint",
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ),
+  );
+
+  const response = await runCounterLawsuitPrototypeDraftComplaint("CLW/1", { force: true }, "proj/legal+workflow");
+
+  expect(response.draftComplaintDocumentKey).toBe("draft-counter-lawsuit-complaint");
+  expect(response.paragraphCount).toBe(2);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const [url, init] = fetchMock.mock.calls[0];
+  expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs/CLW%2F1/draft-counter-lawsuit-complaint?projectId=proj%2Flegal%2Bworkflow");
   expect(init?.method).toBe("POST");
   expect(JSON.parse(String(init?.body))).toEqual({ force: true });
 });

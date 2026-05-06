@@ -385,9 +385,9 @@ function buildResult(params: {
   const sourcePathCount = uniqueSorted(sourceReferences.map((reference) => reference.sourcePath)).length;
   let status: ComplaintDraftStatus = "completed";
   if (!params.claimMapManifest || !params.claimMapTask) status = "blocked";
-  else if (diagnostics.some((diagnostic) => diagnostic.severity === "error")) status = "failed";
   else if (params.claimMapStatus && params.claimMapStatus !== "completed") status = params.claimMapStatus === "not-run" ? "blocked" : params.claimMapStatus;
-  else if (missingProof.length > 0 || paragraphs.some((paragraph) => paragraph.sourcePaths.length === 0)) status = "partial";
+  else if (diagnostics.some((diagnostic) => diagnostic.severity === "error" && diagnostic.code === "draft-complaint-manifest-malformed")) status = "failed";
+  else if (missingProof.length > 0 || diagnostics.some((diagnostic) => diagnostic.severity === "error") || paragraphs.some((paragraph) => paragraph.sourcePaths.length === 0)) status = "partial";
   const sections = buildSections(status, paragraphs, missingProof);
   const unresolvedGaps = missingProof.length + diagnostics.filter((diagnostic) => diagnostic.severity !== "info").length + paragraphs.filter((paragraph) => paragraph.sourcePaths.length === 0).length;
   return {

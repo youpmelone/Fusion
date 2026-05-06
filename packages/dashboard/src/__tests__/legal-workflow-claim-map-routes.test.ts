@@ -167,10 +167,13 @@ describe("legal workflow claim-map routes", () => {
     expect((launch.body as any).evidenceLedger).toMatchObject({ status: "partial", ledgerDocumentKey: "evidence-ledger" });
     expect((launch.body as any).claimMap).toMatchObject({ status: "partial", claimMapDocumentKey: "claim-map", claimCount: expect.any(Number), elementCount: expect.any(Number), missingProofCount: expect.any(Number) });
     expect((launch.body as any).claimMap.safetyNotice).toContain("not filing-ready");
+    expect((launch.body as any).draftComplaint).toMatchObject({ status: "partial", draftComplaintDocumentKey: "draft-counter-lawsuit-complaint", sectionCount: expect.any(Number), paragraphCount: expect.any(Number), claimDraftCount: expect.any(Number), sourceReferenceCount: expect.any(Number), missingProofCount: expect.any(Number) });
+    expect((launch.body as any).draftComplaint.safetyNotice).toContain("not filing-ready");
 
     const status = await request(app, "GET", `/api/legal-workflows/counter-lawsuit/runs/${runId}`);
     expect(status.status).toBe(200);
     expect((status.body as any).claimMap).toMatchObject({ runId, status: "partial", claimMapDocumentKey: "claim-map" });
+    expect((status.body as any).draftComplaint).toMatchObject({ runId, status: "partial", draftComplaintDocumentKey: "draft-counter-lawsuit-complaint" });
     expect((status.body as any).vaultMining.receiptCount).toBe(4);
     expect((status.body as any).authorityValidation.validatedCount).toBeGreaterThan(0);
     expect((status.body as any).researchMemo.evidenceCount).toBe(4);
@@ -193,6 +196,13 @@ describe("legal workflow claim-map routes", () => {
 
     const badForce = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/claim-map`, JSON.stringify({ force: "yes" }), { "Content-Type": "application/json" });
     expect(badForce.status).toBe(400);
+
+    const draftRetry = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/draft-counter-lawsuit-complaint`, JSON.stringify({ force: true }), { "Content-Type": "application/json" });
+    expect(draftRetry.status).toBe(200);
+    expect(draftRetry.body).toMatchObject({ runId, status: "partial", draftComplaintDocumentKey: "draft-counter-lawsuit-complaint", paragraphCount: expect.any(Number) });
+
+    const invalidDraft = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/draft-counter-lawsuit-complaint`, JSON.stringify({ force: true, paragraphs: [] }), { "Content-Type": "application/json" });
+    expect(invalidDraft.status).toBe(400);
   });
 
   it("keeps missing ledger runs blocked and writes visible claim map status", async () => {
@@ -201,7 +211,9 @@ describe("legal workflow claim-map routes", () => {
     expect(launch.status).toBe(201);
     expect((launch.body as any).evidenceLedger.status).toBe("blocked");
     expect((launch.body as any).claimMap.status).toBe("blocked");
+    expect((launch.body as any).draftComplaint.status).toBe("blocked");
     expect((launch.body as any).claimMap.diagnostics.length).toBeGreaterThan(0);
+    expect((launch.body as any).draftComplaint.diagnostics.length).toBeGreaterThan(0);
     expect(JSON.stringify(launch.body)).not.toContain("filing-ready conclusion");
     expect(store.documents.some((doc) => doc.key === "claim-map-status" && doc.content.includes("Status: blocked"))).toBe(true);
     expect(store.documents.some((doc) => doc.key === "claim-map" && doc.content.includes("Status: blocked"))).toBe(true);
@@ -215,21 +227,26 @@ describe("legal workflow claim-map routes", () => {
     expect(alpha.status).toBe(201);
     expect(beta.status).toBe(201);
     expect(projectStores.alpha.documents.some((doc) => doc.key === "claim-map")).toBe(true);
+    expect(projectStores.alpha.documents.some((doc) => doc.key === "draft-counter-lawsuit-complaint")).toBe(true);
     expect(projectStores.beta.documents.some((doc) => doc.key === "claim-map")).toBe(true);
+    expect(projectStores.beta.documents.some((doc) => doc.key === "draft-counter-lawsuit-complaint")).toBe(true);
     expect(projectStores.alpha.documents.every((doc) => doc.taskId.startsWith("alpha-FN-"))).toBe(true);
 
     const unknown = await request(app, "POST", "/api/legal-workflows/counter-lawsuit/runs/CLW-missing/claim-map", JSON.stringify({}), { "Content-Type": "application/json" });
     expect(unknown.status).toBe(404);
+    const unknownDraft = await request(app, "POST", "/api/legal-workflows/counter-lawsuit/runs/CLW-missing/draft-counter-lawsuit-complaint", JSON.stringify({}), { "Content-Type": "application/json" });
+    expect(unknownDraft.status).toBe(404);
   });
 
   it("keeps FN-006-era runs without claim-map stages readable", async () => {
     const { app, store } = buildApp();
     const launch = await request(app, "POST", "/api/legal-workflows/counter-lawsuit/runs", launchBody(), { "Content-Type": "application/json" });
     const runId = (launch.body as any).runId;
-    store.tasks = store.tasks.filter((task) => task.sourceMetadata?.workflowStage !== "claim-map");
+    store.tasks = store.tasks.filter((task) => task.sourceMetadata?.workflowStage !== "claim-map" && task.sourceMetadata?.workflowStage !== "draft-counter-lawsuit-complaint");
     const status = await request(app, "GET", `/api/legal-workflows/counter-lawsuit/runs/${runId}`);
     expect(status.status).toBe(200);
     expect((status.body as any).claimMap).toMatchObject({ status: "not-run", claimCount: 0, safetyNotice: expect.stringContaining("Draft-only") });
+    expect((status.body as any).draftComplaint).toMatchObject({ status: "not-run", paragraphCount: 0, safetyNotice: expect.stringContaining("Draft-only") });
     expect((status.body as any).evidenceLedger).toBeDefined();
   });
 });

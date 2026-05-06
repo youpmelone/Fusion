@@ -16,9 +16,9 @@ interface CounterLawsuitWorkflowViewProps {
 
 const REQUESTED_ARTIFACTS = [
   { id: "claim-map", label: "Claim and counterclaim map" },
+  { id: "draft-counter-lawsuit-complaint", label: "Draft counter-lawsuit complaint" },
   { id: "source-lineage", label: "Evidence and citation lineage packet" },
   { id: "risk-red-team", label: "Opposing-counsel red-team memo" },
-  { id: "draft-response", label: "Draft response outline for attorney review" },
 ] as const;
 
 const SAFEGUARDS: StartCounterLawsuitPrototypeWorkflowInput["safeguards"] = {
