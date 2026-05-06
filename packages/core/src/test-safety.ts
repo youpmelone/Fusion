@@ -67,6 +67,29 @@ export function isProtectedActiveWorktreeTarget(pathValue: PathLike): boolean {
   return gitEntry ? isSameOrWithin(candidate, gitEntry) : false;
 }
 
+export function containsProtectedActiveWorktreeTarget(pathValue: PathLike): boolean {
+  const activeRoot = getProtectedActiveWorktreeRoot();
+  if (!activeRoot) return false;
+
+  const candidate = resolveGuardPath(pathValue);
+  if (!candidate || candidate === ":memory:") return false;
+  if (isSameOrWithin(activeRoot, candidate)) return true;
+
+  const gitEntry = getProtectedActiveWorktreeGitEntry();
+  return gitEntry ? isSameOrWithin(gitEntry, candidate) : false;
+}
+
+export function assertDoesNotContainProtectedActiveWorktreePath(pathValue: PathLike, context = "operation"): void {
+  const candidate = resolveGuardPath(pathValue);
+  if (!candidate || candidate === ":memory:") return;
+  if (!containsProtectedActiveWorktreeTarget(candidate)) return;
+
+  throw new Error(
+    `[test-safety] ${context} would include protected active worktree path: ${candidate}\n` +
+    "Tests must never remove, rename, or recursively copy over an ancestor of the active checkout root or its .git entry.",
+  );
+}
+
 export function assertOutsideRealFusionPath(pathValue: PathLike, context = "operation"): void {
   const candidate = resolveGuardPath(pathValue);
   if (!candidate || candidate === ":memory:") return;
