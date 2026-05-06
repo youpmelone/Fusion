@@ -8499,6 +8499,37 @@ export interface CounterLawsuitEvidenceLedgerRetryInput {
   force?: boolean;
 }
 
+export interface CounterLawsuitClaimMapDiagnostic {
+  code: string;
+  severity: "info" | "warning" | "error";
+  message: string;
+  sourceDocumentKey?: string;
+  sourceTaskId?: string;
+  claimId?: string;
+  elementId?: string;
+  allegationId?: string;
+  factId?: string;
+}
+
+export interface CounterLawsuitClaimMapSummary {
+  runId: string;
+  status: "completed" | "partial" | "blocked" | "failed" | "not-run";
+  claimMapDocumentKey?: "claim-map" | string;
+  statusDocumentKey?: "claim-map-status" | string;
+  claimCount: number;
+  elementCount: number;
+  allegationCount: number;
+  supportingEvidenceCount: number;
+  missingProofCount: number;
+  unresolvedGapCount: number;
+  diagnostics: CounterLawsuitClaimMapDiagnostic[];
+  safetyNotice: string;
+}
+
+export interface CounterLawsuitClaimMapRetryInput {
+  force?: boolean;
+}
+
 export interface StartCounterLawsuitPrototypeWorkflowResponse {
   runId: string;
   status: CounterLawsuitWorkflowRunStatus;
@@ -8519,6 +8550,7 @@ export interface StartCounterLawsuitPrototypeWorkflowResponse {
   authorityValidation?: CounterLawsuitAuthorityValidationSummary;
   researchMemo?: CounterLawsuitResearchMemoSummary;
   evidenceLedger?: CounterLawsuitEvidenceLedgerSummary;
+  claimMap?: CounterLawsuitClaimMapSummary;
 }
 
 export interface CounterLawsuitWorkflowRunStatusResponse {
@@ -8534,6 +8566,7 @@ export interface CounterLawsuitWorkflowRunStatusResponse {
   authorityValidation?: CounterLawsuitAuthorityValidationSummary;
   researchMemo?: CounterLawsuitResearchMemoSummary;
   evidenceLedger?: CounterLawsuitEvidenceLedgerSummary;
+  claimMap?: CounterLawsuitClaimMapSummary;
 }
 
 export function startCounterLawsuitPrototypeWorkflow(
@@ -8607,6 +8640,20 @@ export function runCounterLawsuitPrototypeEvidenceLedger(
 ): Promise<CounterLawsuitEvidenceLedgerSummary> {
   return api<CounterLawsuitEvidenceLedgerSummary>(
     withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/evidence-ledger`, projectId),
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function runCounterLawsuitPrototypeClaimMap(
+  runId: string,
+  input: CounterLawsuitClaimMapRetryInput = {},
+  projectId?: string,
+): Promise<CounterLawsuitClaimMapSummary> {
+  return api<CounterLawsuitClaimMapSummary>(
+    withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/claim-map`, projectId),
     {
       method: "POST",
       body: JSON.stringify(input),

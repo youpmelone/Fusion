@@ -434,10 +434,15 @@ describe("generated legal workflow prompts", () => {
     expect(taskStore.tasks[1].description).toContain("Do not depend on a pre-existing `evidence-ledger`; this stage creates it");
     expect(taskStore.tasks[2].description).toContain("read task document key `evidence-ledger` from the evidence-ledger stage task");
     expect(taskStore.tasks[2].description).toContain("`evidence-ledger-status` reports blocked, partial, failed, stale, or unresolved prerequisites");
+    expect(taskStore.tasks[2].description).toContain("Do not depend on a pre-existing `claim-map`; this stage creates it");
+    expect(taskStore.tasks[3].description).toContain("task document key `claim-map` from the claim-map stage task");
+    expect(taskStore.tasks[3].description).toContain("`claim-map-status` reports blocked, partial, failed, stale, or unresolved prerequisites");
     expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key research-memo for source-linked evidence");
     expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key research-memo-status");
     expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key evidence-ledger for source-linked fact rows");
     expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key evidence-ledger-status");
+    expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key claim-map for claim groups, element rows, allegation-to-evidence links, missing-proof entries");
+    expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key claim-map-status");
 
     const allDocumentContent = taskStore.documents.map((document) => document.content).join("\n---\n");
     const stageDocumentContent = taskStore.documents.filter((document) => document.key === COUNTER_LAWSUIT_STAGE_DOCUMENT_KEY).map((document) => document.content).join("\n");
@@ -454,8 +459,10 @@ describe("generated legal workflow prompts", () => {
     expect(stageDocumentContent).toContain("Read task document key `courtlistener-authority-validation` when present");
     expect(stageDocumentContent).toContain("Read task document key `research-memo` from the research-memo stage task");
     expect(stageDocumentContent).toContain("task document key `evidence-ledger` from the evidence-ledger stage task");
+    expect(stageDocumentContent).toContain("task document key `claim-map` from the claim-map stage task");
     expect(stageDocumentContent).toContain("research-memo-status` blocked, partial, or failed entries as unresolved prerequisites");
     expect(stageDocumentContent).toContain("evidence-ledger-status` blocked, partial, failed, stale, or unresolved entries as unresolved prerequisites");
+    expect(stageDocumentContent).toContain("claim-map-status` blocked, partial, failed, stale, or unresolved entries as unresolved prerequisites");
     expect(stageDocumentContent).toContain("Missing, unmatched, ambiguous, or unavailable CourtListener validation remains an unresolved authority gap");
     expect(stageDocumentContent).toContain("not good-law verification");
     expect(stageDocumentContent).toContain("not citation-format validation");

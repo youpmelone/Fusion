@@ -25,6 +25,14 @@ import {
   type EvidenceLedgerConfidence,
 } from "../legal-evidence-ledger.js";
 import {
+  CLAIM_MAP_DOCUMENT_KEY,
+  CLAIM_MAP_SAFETY_NOTICE,
+  deriveClaimMapStatusForRun,
+  generateCounterLawsuitClaimMap,
+  type ClaimMapDiagnostic,
+  type CounterLawsuitClaimMapResult,
+} from "../legal-claim-map.js";
+import {
   COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY,
   COURTLISTENER_SAFETY_NOTICE,
   deriveAuthorityValidationStatusForRun,
@@ -106,6 +114,21 @@ export interface LegalWorkflowEvidenceLedgerSummary {
   citationStatusCounts: Record<EvidenceLedgerCitationStatusKind, number>;
   confidenceCounts: Record<EvidenceLedgerConfidence, number>;
   diagnostics: EvidenceLedgerDiagnostic[];
+  safetyNotice: string;
+}
+
+export interface LegalWorkflowClaimMapSummary {
+  runId: string;
+  status: CounterLawsuitClaimMapResult["status"];
+  claimMapDocumentKey?: string;
+  statusDocumentKey?: string;
+  claimCount: number;
+  elementCount: number;
+  allegationCount: number;
+  supportingEvidenceCount: number;
+  missingProofCount: number;
+  unresolvedGapCount: number;
+  diagnostics: ClaimMapDiagnostic[];
   safetyNotice: string;
 }
 
@@ -393,6 +416,64 @@ function validateEvidenceLedgerRetryPayload(body: unknown): { force?: boolean } 
   return validateForceOnlyPayload(body, "evidence ledger");
 }
 
+function claimMapFailureSummary(runId: string): LegalWorkflowClaimMapSummary {
+  return {
+    runId,
+    status: "failed",
+    claimMapDocumentKey: CLAIM_MAP_DOCUMENT_KEY,
+    claimCount: 0,
+    elementCount: 0,
+    allegationCount: 0,
+    supportingEvidenceCount: 0,
+    missingProofCount: 0,
+    unresolvedGapCount: 0,
+    diagnostics: [{
+      code: "claim-map-route-failed",
+      severity: "error",
+      message: "Claim map generation failed before a claim-map summary could be returned. The workflow run remains queued; retry the claim-map endpoint after checking prerequisite documents.",
+      sourceDocumentKey: CLAIM_MAP_DOCUMENT_KEY,
+    }],
+    safetyNotice: CLAIM_MAP_SAFETY_NOTICE,
+  };
+}
+
+async function runClaimMapForResponse(params: {
+  store: TaskStore;
+  runId: string;
+  force?: boolean;
+  deps: LegalWorkflowRouteDeps;
+}): Promise<LegalWorkflowClaimMapSummary> {
+  try {
+    const result = await generateCounterLawsuitClaimMap({
+      taskStore: params.store,
+      runId: params.runId,
+      force: params.force,
+      now: params.deps.now,
+    });
+    return {
+      runId: result.runId,
+      status: result.status,
+      claimMapDocumentKey: result.claimMapDocumentKey,
+      statusDocumentKey: result.statusDocumentKey,
+      claimCount: result.counts.claims,
+      elementCount: result.counts.elements,
+      allegationCount: result.counts.allegations,
+      supportingEvidenceCount: result.counts.supportingEvidence,
+      missingProofCount: result.counts.missingProof,
+      unresolvedGapCount: result.counts.unresolvedGaps,
+      diagnostics: result.diagnostics,
+      safetyNotice: result.safetyNotice,
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.statusCode === 404) throw error;
+    return claimMapFailureSummary(params.runId);
+  }
+}
+
+function validateClaimMapRetryPayload(body: unknown): { force?: boolean } {
+  return validateForceOnlyPayload(body, "claim map");
+}
+
 export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWorkflowRouteDeps = {}): void {
   const { router, getProjectContext, rethrowAsApiError } = ctx;
   const createAgentStore = deps.createAgentStore ?? defaultCreateAgentStore;
@@ -427,7 +508,12 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         runId: response.runId,
         deps,
       });
-      res.status(201).json({ ...response, vaultMining, authorityValidation, researchMemo, evidenceLedger });
+      const claimMap = await runClaimMapForResponse({
+        store: scopedStore,
+        runId: response.runId,
+        deps,
+      });
+      res.status(201).json({ ...response, vaultMining, authorityValidation, researchMemo, evidenceLedger, claimMap });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;
@@ -532,6 +618,30 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
     }
   });
 
+  router.post("/legal-workflows/counter-lawsuit/runs/:runId/claim-map", async (req, res) => {
+    try {
+      if (!req.params.runId?.trim()) throw badRequest("runId is required");
+      const { store: scopedStore } = await getProjectContext(req);
+      const request = validateClaimMapRetryPayload(req.body);
+      await getCounterLawsuitWorkflowRunStatus({
+        taskStore: scopedStore,
+        runId: req.params.runId,
+      });
+      const claimMap = await runClaimMapForResponse({
+        store: scopedStore,
+        runId: req.params.runId,
+        force: request.force,
+        deps,
+      });
+      res.json(claimMap);
+    } catch (error: unknown) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      rethrowAsApiError(error);
+    }
+  });
+
   router.get("/legal-workflows/counter-lawsuit/runs/:runId", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
@@ -555,7 +665,11 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         taskStore: scopedStore,
         runId: req.params.runId,
       });
-      res.json({ ...status, vaultMining, authorityValidation, researchMemo, evidenceLedger });
+      const claimMap = await deriveClaimMapStatusForRun({
+        taskStore: scopedStore,
+        runId: req.params.runId,
+      });
+      res.json({ ...status, vaultMining, authorityValidation, researchMemo, evidenceLedger, claimMap });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;

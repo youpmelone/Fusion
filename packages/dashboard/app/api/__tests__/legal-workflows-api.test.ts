@@ -2,12 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   fetchCounterLawsuitPrototypeWorkflowRunStatus,
   runCounterLawsuitPrototypeAuthorityValidation,
+  runCounterLawsuitPrototypeClaimMap,
   runCounterLawsuitPrototypeEvidenceLedger,
   runCounterLawsuitPrototypeResearchMemo,
   runCounterLawsuitPrototypeVaultMining,
   startCounterLawsuitPrototypeWorkflow,
   type StartCounterLawsuitPrototypeWorkflowInput,
 } from "../legacy";
+
+beforeEach(() => {
+  vi.restoreAllMocks();
+  localStorage.clear();
+});
 
 const input: StartCounterLawsuitPrototypeWorkflowInput = {
   matterName: "Acme response matter",
@@ -23,11 +29,6 @@ const input: StartCounterLawsuitPrototypeWorkflowInput = {
 };
 
 describe("legal workflow API helpers", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    localStorage.clear();
-  });
-
   it("starts a counter-lawsuit prototype run with project scoping and fixed safeguards", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
@@ -41,6 +42,7 @@ describe("legal workflow API helpers", () => {
           authorityValidation: { runId: "LWR-1", status: "no-candidates", candidateCount: 0, validatedCount: 0, unmatchedCount: 0, diagnostics: [], safetyNotice: "not good-law verification" },
           researchMemo: { runId: "LWR-1", status: "blocked", evidenceCount: 0, authorityCount: 0, conclusionCount: 2, sourcePathCount: 0, diagnostics: [], safetyNotice: "draft-only" },
           evidenceLedger: { runId: "LWR-1", status: "blocked", factCount: 1, sourceLinkCount: 0, claimLinkCount: 1, unresolvedGapCount: 1, citationStatusCounts: { "source-linked-local-evidence": 0, "matched-courtlistener-lookup-record": 0, "unresolved-authority-lookup-record": 0, "missing-source-link": 1, "needs-human-citation-verification": 1 }, confidenceCounts: { high: 0, medium: 0, low: 0, unsupported: 1 }, diagnostics: [], safetyNotice: "draft-only ledger" },
+          claimMap: { runId: "LWR-1", status: "blocked", claimCount: 1, elementCount: 1, allegationCount: 0, supportingEvidenceCount: 0, missingProofCount: 1, unresolvedGapCount: 1, diagnostics: [], safetyNotice: "draft-only claim map" },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -53,6 +55,7 @@ describe("legal workflow API helpers", () => {
     expect(response.authorityValidation?.status).toBe("no-candidates");
     expect(response.researchMemo?.status).toBe("blocked");
     expect(response.evidenceLedger?.status).toBe("blocked");
+    expect(response.claimMap?.status).toBe("blocked");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs?projectId=proj%2Flegal%2Bworkflow");
@@ -82,6 +85,7 @@ describe("legal workflow API helpers", () => {
           authorityValidation: { runId: "CLW-1", status: "not-run", candidateCount: 0, validatedCount: 0, unmatchedCount: 0, diagnostics: [], safetyNotice: "not filing readiness" },
           researchMemo: { runId: "CLW-1", status: "not-run", evidenceCount: 0, authorityCount: 0, conclusionCount: 0, sourcePathCount: 0, diagnostics: [], safetyNotice: "draft-only" },
           evidenceLedger: { runId: "CLW-1", status: "not-run", factCount: 0, sourceLinkCount: 0, claimLinkCount: 0, unresolvedGapCount: 0, citationStatusCounts: { "source-linked-local-evidence": 0, "matched-courtlistener-lookup-record": 0, "unresolved-authority-lookup-record": 0, "missing-source-link": 0, "needs-human-citation-verification": 0 }, confidenceCounts: { high: 0, medium: 0, low: 0, unsupported: 0 }, diagnostics: [], safetyNotice: "draft-only ledger" },
+          claimMap: { runId: "CLW-1", status: "not-run", claimCount: 0, elementCount: 0, allegationCount: 0, supportingEvidenceCount: 0, missingProofCount: 0, unresolvedGapCount: 0, diagnostics: [], safetyNotice: "draft-only claim map" },
         }),
         { status: 200, headers: { "content-type": "application/json" } },
       ),
@@ -94,6 +98,7 @@ describe("legal workflow API helpers", () => {
     expect(response.authorityValidation?.status).toBe("not-run");
     expect(response.researchMemo?.status).toBe("not-run");
     expect(response.evidenceLedger?.status).toBe("not-run");
+    expect(response.claimMap?.status).toBe("not-run");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs/CLW%2F1?projectId=proj%2Flegal%2Bworkflow");
@@ -217,6 +222,39 @@ it("retries counter-lawsuit evidence ledger generation with project scoping", as
   expect(fetchMock).toHaveBeenCalledTimes(1);
   const [url, init] = fetchMock.mock.calls[0];
   expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs/CLW%2F1/evidence-ledger?projectId=proj%2Flegal%2Bworkflow");
+  expect(init?.method).toBe("POST");
+  expect(JSON.parse(String(init?.body))).toEqual({ force: true });
+});
+
+it("retries counter-lawsuit claim-map generation with project scoping", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        runId: "CLW-1",
+        status: "partial",
+        claimMapDocumentKey: "claim-map",
+        statusDocumentKey: "claim-map-status",
+        claimCount: 2,
+        elementCount: 2,
+        allegationCount: 2,
+        supportingEvidenceCount: 2,
+        missingProofCount: 3,
+        unresolvedGapCount: 3,
+        diagnostics: [],
+        safetyNotice: "draft-only and not filing-ready",
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ),
+  );
+
+  const response = await runCounterLawsuitPrototypeClaimMap("CLW/1", { force: true }, "proj/legal+workflow");
+
+  expect(response.claimCount).toBe(2);
+  expect(response.safetyNotice).toContain("not filing-ready");
+  expect(response.missingProofCount).toBe(3);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const [url, init] = fetchMock.mock.calls[0];
+  expect(url).toBe("/api/legal-workflows/counter-lawsuit/runs/CLW%2F1/claim-map?projectId=proj%2Flegal%2Bworkflow");
   expect(init?.method).toBe("POST");
   expect(JSON.parse(String(init?.body))).toEqual({ force: true });
 });

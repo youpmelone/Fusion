@@ -104,6 +104,20 @@ The response keeps the FN-001 dashboard contract and adds orchestration details:
     diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string; factId?: string }>;
     safetyNotice: string;
   };
+  claimMap: {
+    runId: string;
+    status: "completed" | "partial" | "blocked" | "failed" | "not-run";
+    claimMapDocumentKey?: "claim-map";
+    statusDocumentKey?: "claim-map-status";
+    claimCount: number;
+    elementCount: number;
+    allegationCount: number;
+    supportingEvidenceCount: number;
+    missingProofCount: number;
+    unresolvedGapCount: number;
+    diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string; claimId?: string; elementId?: string; allegationId?: string; factId?: string }>;
+    safetyNotice: string;
+  };
 }
 ```
 
@@ -116,6 +130,8 @@ After vault mining is attempted, Fusion also runs a bounded CourtListener author
 After vault mining and CourtListener validation are attempted, Fusion generates the first downstream artifact: a draft `research-memo` task document on the research-memo stage task. The memo is deterministic from persisted `vault-mining-receipts`, `vault-mining-status`, `courtlistener-authority-validation`, and `courtlistener-status` documents. API callers cannot submit memo text, legal conclusions, source manifests, source paths, CourtListener records, external command configuration, tokens, headers, or raw fetch options.
 
 After research memo generation is attempted, Fusion generates the structured `evidence-ledger` task document on the evidence-ledger stage task. The ledger is deterministic from persisted `research-memo` and `research-memo-status` documents only. API callers cannot submit ledger text, fact rows, claim mappings, confidence scores, citation statuses, source manifests, source paths, CourtListener records, external command configuration, tokens, headers, or raw fetch options.
+
+After evidence ledger generation is attempted, Fusion generates the structured `claim-map` task document on the claim-map stage task. The claim map is deterministic from persisted `evidence-ledger` and `evidence-ledger-status` documents, with safe research memo conclusion labels used only for labels. API callers cannot submit claim-map text, legal elements, allegations, evidence mappings, confidence scores, source paths, CourtListener records, external commands, tokens, headers, or raw fetch options.
 
 ## Vault-mining MCP setup
 
@@ -236,6 +252,26 @@ Unknown fields return `400`. Unknown run IDs return `404`.
 
 The response shape is the same `evidenceLedger` summary returned by launch and status. `force: true` asks Fusion to regenerate from persisted research memo documents, but it still does not accept generated ledger text, fact rows, claim mappings, confidence scores, source paths, citation statuses, CourtListener records, or provider configuration from the request body.
 
+## Claim map retry API
+
+Generate or retry the structured claim map for an existing run with:
+
+```http
+POST /api/legal-workflows/counter-lawsuit/runs/:runId/claim-map
+```
+
+The request body accepts only:
+
+```ts
+{
+  force?: boolean;
+}
+```
+
+Unknown fields return `400`. Unknown run IDs return `404`.
+
+The response shape is the same `claimMap` summary returned by launch and status. `force: true` asks Fusion to regenerate from persisted evidence ledger documents, but it still does not accept generated claim-map text, legal elements, allegations, evidence mappings, source paths, confidence scores, CourtListener records, external commands, tokens, headers, or raw fetch options from the request body.
+
 ## Status API
 
 Fetch derived run status with:
@@ -244,13 +280,15 @@ Fetch derived run status with:
 GET /api/legal-workflows/counter-lawsuit/runs/:runId
 ```
 
-The status endpoint finds tasks whose `sourceMetadata.workflowRunId` matches the run ID. It returns the stage task statuses, artifact keys, safety gates, source scope status, lineage document references, the current vault-mining summary, the current CourtListener authority-validation summary, the current research memo summary, and the current evidence ledger summary.
+The status endpoint finds tasks whose `sourceMetadata.workflowRunId` matches the run ID. It returns the stage task statuses, artifact keys, safety gates, source scope status, lineage document references, the current vault-mining summary, the current CourtListener authority-validation summary, the current research memo summary, the current evidence ledger summary, and the current claim-map summary.
 
 The `authorityValidation` status includes the research run ID, candidate count, matched count, unmatched/ambiguous/unavailable count, diagnostics, safety notice, and document key references for `courtlistener-authority-validation` and `courtlistener-status` when present.
 
 The `researchMemo` status includes status, memo document key, status document key when present, evidence count, authority count, conclusion count, source-path count, diagnostics, and safety notice. If only `research-memo-status` exists, status preserves that persisted blocker or failure instead of recomputing success from upstream prerequisites. If neither memo document exists, status is `not-run`.
 
 The `evidenceLedger` status includes status, ledger document key, status document key when present, fact count, source-link count, preliminary claim-link count, unresolved gap count, citation-status counts, confidence counts, diagnostics, and safety notice. If `evidence-ledger-status` reports blocked, partial, failed, stale, or unresolved prerequisites, status preserves that blocker instead of treating a stale primary ledger as completed support. If neither ledger document exists, status is `not-run`.
+
+The `claimMap` status includes status, claim-map document key, status document key when present, claim count, element count, allegation count, supporting-evidence count, missing-proof count, unresolved gap count, diagnostics, and safety notice. If `claim-map-status` reports blocked, partial, failed, stale, or unresolved prerequisites, status preserves that blocker instead of treating a stale primary claim map as completed support. Older runs without a claim-map stage return `claimMap.status: "not-run"` while preserving earlier summaries.
 
 Unknown run IDs return `404`.
 
@@ -279,7 +317,9 @@ After authority validation runs, the research memo task receives `courtlistener-
 
 After research memo generation runs, the research memo task receives `research-memo`. When generation is blocked, partial, or failed, Fusion also writes `research-memo-status`. The evidence-ledger stage reads `research-memo` and treats `research-memo-status` blockers as unresolved prerequisites, not support.
 
-After evidence ledger generation runs, the evidence-ledger task receives `evidence-ledger`. When generation is blocked, partial, failed, or stale because of `research-memo-status`, Fusion also writes `evidence-ledger-status`. Claim-map and later stages read `evidence-ledger` when it exists and treat `evidence-ledger-status` blockers as unresolved prerequisites, not support.
+After evidence ledger generation runs, the evidence-ledger task receives `evidence-ledger`. When generation is blocked, partial, failed, or stale because of `research-memo-status`, Fusion also writes `evidence-ledger-status`. The claim-map stage reads `evidence-ledger` when it exists and treats `evidence-ledger-status` blockers as unresolved prerequisites, not support.
+
+After claim-map generation runs, the claim-map task receives `claim-map`. When generation is blocked, partial, failed, or stale because of `evidence-ledger-status`, Fusion also writes `claim-map-status`. Complaint-drafting and later stages read `claim-map` when it exists and treat `claim-map-status` blockers as unresolved prerequisites, not support.
 
 ## Vault-mining receipt schema
 
@@ -448,6 +488,38 @@ The ledger is draft-only and source-linked only. It is not legal advice, not ver
 
 Raw MCP payloads, full note bodies, CourtListener raw payloads, authorization headers, API tokens, token-like provider errors, and unbounded source text are not persisted in the ledger, ledger status, metadata, or API responses.
 
+## Claim map document schema
+
+The `claim-map` document contains a human-readable structured claim map plus this machine-readable JSON manifest:
+
+```ts
+{
+  runId: string;
+  generatedAt: string;
+  status: "completed" | "partial" | "blocked" | "failed";
+  sourceDocuments: Array<{ taskId: string; key: "research-memo" | "evidence-ledger" | "evidence-ledger-status"; present: boolean; parsedFrom?: string; status?: string }>;
+  researchMemoTaskId?: string;
+  evidenceLedgerTaskId: string;
+  claimMapTaskId: string;
+  claims: Array<{ claimId: string; conclusionId?: string; label: string; status: "supported-draft" | "partial-draft" | "missing-proof" | "blocked"; elementIds: string[]; allegationIds: string[]; supportingEvidenceIds: string[]; authorityRecordIds: string[]; citationStatusIds: string[]; missingProofIds: string[]; unresolvedDraftOnly: boolean; verified: false }>;
+  elements: Array<{ elementId: string; claimId: string; label: string; status: "supported-draft" | "partial-draft" | "missing-proof" | "blocked"; allegationIds: string[]; supportingEvidenceIds: string[]; authorityRecordIds: string[]; citationStatusIds: string[]; missingProofIds: string[]; invented: false; verified: false }>;
+  allegations: Array<{ allegationId: string; claimId: string; elementId: string; factId: string; allegationText: string; supportingEvidenceIds: string[]; sourceLinkIds: string[]; receiptIds: string[]; sourcePaths: string[]; authorityRecordIds: string[]; citationStatusIds: string[]; upstreamConfidence: "high" | "medium" | "low" | "unsupported"; verified: false; unresolvedDraftOnly: boolean }>;
+  supportingEvidence: Array<{ supportingEvidenceId: string; claimId: string; elementId: string; allegationId: string; factId: string; sourceLinkId: string; receiptId: string; sourcePath: string; citationStatusIds: string[]; verified: false }>;
+  missingProof: Array<{ missingProofId: string; scope: string; severity: "info" | "warning" | "error"; reason: string; claimId?: string; elementId?: string; allegationId?: string; factId?: string; unresolved: true }>;
+  diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string }>;
+  counts: { claims: number; elements: number; allegations: number; supportingEvidence: number; missingProof: number; unresolvedGaps: number };
+  safetyNotice: string;
+}
+```
+
+Claim-map rows are built only from safe evidence ledger fields: `facts`, `sourceLinks`, `claimLinks`, `citationStatuses`, `confidenceRubric`, `diagnostics`, `sourceDocuments`, and `safetyNotice`. Safe research memo conclusion IDs and text may be used only as labels. Legal elements are never invented: absent upstream element metadata creates a “Legal element pending authority-backed extraction” placeholder and missing-proof rows.
+
+The `claim-map-status` document records blocked, partial, failed, or stale-blocker state with safe counts, diagnostics, document keys, missing-proof counts, and the safety notice. Missing evidence ledgers, malformed manifests, blocked `evidence-ledger-status`, missing source paths, unsupported facts, unresolved authorities, missing legal elements, and human citation/source verification requirements remain visible as diagnostics or missing-proof entries.
+
+The claim map is draft-only and source-linked only. It is not legal advice, not verified fact support, not good-law verification, not citation-format validation, not filing-ready, not human verified, and not promoted for filing. It does not create the complaint draft, red-team report, lineage/scoring log, legal advice, citation validation, good-law verification, or filing-ready conclusions.
+
+Raw MCP payloads, full note bodies, CourtListener raw payloads, authorization headers, API tokens, token-like provider errors, and unbounded source text are not persisted in the claim map, claim-map status, metadata, or API responses.
+
 ## Agents and Codex legal skills
 
 The server creates or reuses durable legal workflow agents. It does not create ephemeral runtime agents for this workflow.
@@ -462,7 +534,7 @@ Every generated stage task enables three prompt-mode pre-merge workflow steps:
 - Opposing-counsel red-team review
 - Lineage preservation
 
-The citation/source prompt checks `research-memo` for source-linked evidence, matched authorities when used as support, unresolved gaps, and lineage. It checks `research-memo-status` for unresolved blockers. It checks `evidence-ledger` for source-linked fact rows, preliminary claim links, confidence labels, citation status, unresolved gaps, and absence of positive promotion or filing-ready claims. It checks `evidence-ledger-status` for blocked, partial, failed, stale, or unresolved prerequisites. It also checks `courtlistener-authority-validation` when legal authorities are cited and the document exists.
+The citation/source prompt checks `research-memo` for source-linked evidence, matched authorities when used as support, unresolved gaps, and lineage. It checks `research-memo-status` for unresolved blockers. It checks `evidence-ledger` for source-linked fact rows, preliminary claim links, confidence labels, citation status, unresolved gaps, and absence of positive promotion or filing-ready claims. It checks `evidence-ledger-status` for blocked, partial, failed, stale, or unresolved prerequisites. It checks `claim-map` for claim groups, element rows, allegation-to-evidence links, missing-proof entries, unresolved authority gaps, and absence of positive promotion or filing-ready claims. It checks `claim-map-status` for blocked, partial, failed, stale, or unresolved prerequisites. It also checks `courtlistener-authority-validation` when legal authorities are cited and the document exists.
 
 It requires `REQUEST REVISION` when an authority is used as support without a matched CourtListener record, or when missing, unmatched, ambiguous, or unavailable CourtListener results are presented as support. Explicitly labeled unverified authority notes may remain only as unresolved research gaps; they do not satisfy the completion gate as support.
 
@@ -476,8 +548,8 @@ When no `vaultScope`, `sourceScope`, or `sourceQuery` is supplied, the run recor
 
 ## Integration boundaries
 
-This workflow now mines QMD MCP and Obsidian MCP for source-linked local receipts, uses CourtListener for bounded authority lookup when candidates are available, generates a source-linked draft research memo from those persisted manifests, and generates a structured evidence ledger from the persisted memo documents.
+This workflow now mines QMD MCP and Obsidian MCP for source-linked local receipts, uses CourtListener for bounded authority lookup when candidates are available, generates a source-linked draft research memo from those persisted manifests, generates a structured evidence ledger from the persisted memo documents, and generates a structured claim map from the persisted evidence ledger documents.
 
 CourtListener can confirm that a citation or query maps to a CourtListener record or candidate match. It does not Shepardize, determine good-law status, verify legal conclusions, check final filing citation format, decide filing readiness, generate filings, or replace attorney judgment.
 
-Stage prompts instruct agents to use integrations when available and to mark unavailable integration results as unverified. Outputs, mined receipts, authority-validation records, generated research memos, and generated evidence ledgers are drafts or source manifests only. They are not promoted, reliable, or ready for use until citation/source verification, opposing-counsel red-team review, lineage preservation, and qualified human verification pass.
+Stage prompts instruct agents to use integrations when available and to mark unavailable integration results as unverified. Outputs, mined receipts, authority-validation records, generated research memos, generated evidence ledgers, and generated claim maps are drafts or source manifests only. They are not promoted, reliable, or ready for use until citation/source verification, opposing-counsel red-team review, lineage preservation, and qualified human verification pass.
