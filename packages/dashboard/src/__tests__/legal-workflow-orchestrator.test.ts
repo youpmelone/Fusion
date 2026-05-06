@@ -422,7 +422,10 @@ describe("generated legal workflow prompts", () => {
       expect(task.description).toContain(`Write the primary output to task document key \`${expectedDocumentKey}\``);
       expect(task.description).toContain("All generated materials are drafts only");
       expect(task.description).toContain("not legal advice");
-      expect(task.description).toContain("not promoted, reliable, or ready for use until citation/source verification");
+      expect(task.description).toContain("not verified facts");
+      expect(task.description).toContain("not human verification");
+      expect(task.description).toContain("not promoted for filing");
+      expect(task.description).toContain("Safety gates can surface blockers, but they do not create filing readiness or attorney review");
       expect(task.description).not.toMatch(/verified and reliable/i);
     }
 
@@ -437,21 +440,35 @@ describe("generated legal workflow prompts", () => {
     expect(taskStore.tasks[2].description).toContain("Do not depend on a pre-existing `claim-map`; this stage creates it");
     expect(taskStore.tasks[3].description).toContain("task document key `claim-map` from the claim-map stage task");
     expect(taskStore.tasks[3].description).toContain("`claim-map-status` reports blocked, partial, failed, stale, or unresolved prerequisites");
+    expect(taskStore.tasks[3].description).toContain("Do not depend on a pre-existing `draft-counter-lawsuit-complaint`; this stage creates it");
+    expect(taskStore.tasks[4].description).toContain("read task document key `draft-counter-lawsuit-complaint`");
+    expect(taskStore.tasks[4].description).toContain("draft-counter-lawsuit-complaint-status blockers as unresolved prerequisites");
+    expect(taskStore.tasks[4].description).toContain("artifact to attack");
+    expect(taskStore.tasks[5].description).toContain("`draft-counter-lawsuit-complaint-status`");
+    expect(taskStore.tasks[5].description).toContain("preserve them in lineage");
     expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key research-memo for source-linked evidence");
     expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key research-memo-status");
     expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key evidence-ledger for source-linked fact rows");
     expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key evidence-ledger-status");
     expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key claim-map for claim groups, element rows, allegation-to-evidence links, missing-proof entries");
     expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key claim-map-status");
+    expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key draft-counter-lawsuit-complaint for draft complaint paragraphs");
+    expect(taskStore.workflowSteps[0].prompt).toContain("source references, missing-proof blockers, unresolved authorities, red-team-pending labels");
+    expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key draft-counter-lawsuit-complaint-status");
+    expect(taskStore.workflowSteps[0].prompt).toContain("lookup-only authority validation");
+    expect(taskStore.workflowSteps[1].prompt).toContain("draft-counter-lawsuit-complaint as the draft artifact to attack");
+    expect(taskStore.workflowSteps[1].prompt).toContain("This workflow step does not generate the FN-015 red-team report");
+    expect(taskStore.workflowSteps[2].prompt).toContain("draft complaint paragraph IDs");
+    expect(taskStore.workflowSteps[2].prompt).toContain("draft-counter-lawsuit-complaint-status reports blocked, partial, failed, stale, or unresolved prerequisites");
 
     const allDocumentContent = taskStore.documents.map((document) => document.content).join("\n---\n");
     const stageDocumentContent = taskStore.documents.filter((document) => document.key === COUNTER_LAWSUIT_STAGE_DOCUMENT_KEY).map((document) => document.content).join("\n");
     for (const document of taskStore.documents) {
       expect(document.content).toContain("draft");
-      expect(document.content).toMatch(/not promoted.*reliable|not promoted, reliable/s);
-      expect(document.content).toMatch(/citation\/source verification|source\/citation verification/);
-      expect(document.content).toContain("opposing-counsel red-team review");
-      expect(document.content).toContain("lineage preservation");
+      expect(document.content).toMatch(/not promoted for filing|do not provide legal advice/s);
+      expect(document.content).toMatch(/citation[-\/]source verification|source\/citation verification|source-linked only/);
+      expect(document.content).toMatch(/opposing-counsel[- ]red-team/);
+      expect(document.content).toMatch(/lineage[- ]preservation/);
     }
     expect(allDocumentContent).toContain("All generated outputs are drafts only");
     expect(stageDocumentContent).toContain("Read task document key `vault-mining-receipts` as the required first source manifest");
@@ -460,13 +477,18 @@ describe("generated legal workflow prompts", () => {
     expect(stageDocumentContent).toContain("Read task document key `research-memo` from the research-memo stage task");
     expect(stageDocumentContent).toContain("task document key `evidence-ledger` from the evidence-ledger stage task");
     expect(stageDocumentContent).toContain("task document key `claim-map` from the claim-map stage task");
+    expect(stageDocumentContent).toContain("task document key `draft-counter-lawsuit-complaint`");
+    expect(stageDocumentContent).toContain("draft-counter-lawsuit-complaint-status");
+    expect(stageDocumentContent).toContain("draft-only artifact to attack");
     expect(stageDocumentContent).toContain("research-memo-status` blocked, partial, or failed entries as unresolved prerequisites");
     expect(stageDocumentContent).toContain("evidence-ledger-status` blocked, partial, failed, stale, or unresolved entries as unresolved prerequisites");
-    expect(stageDocumentContent).toContain("claim-map-status` blocked, partial, failed, stale, or unresolved entries as unresolved prerequisites");
+    expect(stageDocumentContent).toContain("`claim-map-status` reports blocked, partial, failed, stale, or unresolved prerequisites");
     expect(stageDocumentContent).toContain("Missing, unmatched, ambiguous, or unavailable CourtListener validation remains an unresolved authority gap");
     expect(stageDocumentContent).toContain("not good-law verification");
     expect(stageDocumentContent).toContain("not citation-format validation");
     expect(stageDocumentContent).toContain("not filing-ready");
+    expect(stageDocumentContent).toContain("not verified facts");
+    expect(stageDocumentContent).toContain("not human verification");
     expect(stageDocumentContent).toContain("not promoted for filing");
     for (const key of ["research-memo", "evidence-ledger", "claim-map", "draft-counter-lawsuit-complaint", "red-team-report", "lineage-scoring-log"]) {
       expect(stageDocumentContent).toContain(`Output document key: ${key}`);

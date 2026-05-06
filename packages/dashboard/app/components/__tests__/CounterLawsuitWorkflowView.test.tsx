@@ -29,8 +29,12 @@ describe("CounterLawsuitWorkflowView", () => {
     expect(screen.getByRole("heading", { name: "Opposing-counsel red team" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Lineage preservation" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Human verification required" })).toBeInTheDocument();
+    expect(screen.getByText("Research memo")).toBeInTheDocument();
+    expect(screen.getByText("Evidence ledger")).toBeInTheDocument();
     expect(screen.getByText("Claim and counterclaim map")).toBeInTheDocument();
-    expect(screen.getByText("Evidence and citation lineage packet")).toBeInTheDocument();
+    expect(screen.getByText("Draft counter-lawsuit complaint")).toBeInTheDocument();
+    expect(screen.getByText("Opposing-counsel red-team report")).toBeInTheDocument();
+    expect(screen.getByText("Lineage and scoring log")).toBeInTheDocument();
   });
 
   it("shows an accessible validation error when the matter name is missing", async () => {
@@ -67,7 +71,7 @@ describe("CounterLawsuitWorkflowView", () => {
         matterName: "Acme response matter",
         focus: "Retaliation timeline",
         vaultScope: "vault/acme",
-        requestedArtifacts: ["claim-map", "source-lineage", "risk-red-team", "draft-response"],
+        requestedArtifacts: ["research-memo", "evidence-ledger", "claim-map", "draft-counter-lawsuit-complaint", "red-team-report", "lineage-scoring-log"],
         safeguards: {
           citationSourceVerification: true,
           opposingCounselRedTeam: true,
@@ -109,7 +113,7 @@ describe("CounterLawsuitWorkflowView", () => {
       message: "Run accepted",
       artifacts: [
         { id: "claim-map", label: "Claim map", status: "queued" },
-        { id: "draft-response", label: "Draft response outline", status: "pending" },
+        { id: "draft-counter-lawsuit-complaint", label: "Draft counter-lawsuit complaint", status: "pending" },
       ],
     });
 
@@ -123,7 +127,7 @@ describe("CounterLawsuitWorkflowView", () => {
     expect(screen.getByText("FN-222")).toBeInTheDocument();
     const returnedArtifacts = screen.getByRole("list", { name: "Returned artifacts" });
     expect(within(returnedArtifacts).getByText("Claim map")).toBeInTheDocument();
-    expect(within(returnedArtifacts).getByText("Draft response outline")).toBeInTheDocument();
+    expect(within(returnedArtifacts).getByText("Draft counter-lawsuit complaint")).toBeInTheDocument();
   });
 
   it("shows a friendly error when the backend endpoint is not installed yet", async () => {
