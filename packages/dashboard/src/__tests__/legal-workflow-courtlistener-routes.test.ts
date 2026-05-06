@@ -121,7 +121,12 @@ class FakeCourtListenerClient implements CourtListenerClient {
   }
 }
 
-function buildApp(options: { courtListenerClient?: CourtListenerClient; projectStores?: Record<string, FakeTaskStore> } = {}) {
+function buildApp(options: {
+  courtListenerClient?: CourtListenerClient;
+  projectStores?: Record<string, FakeTaskStore>;
+  mcpClientFactory?: Parameters<typeof registerLegalWorkflowRoutes>[1]["mcpClientFactory"];
+  searchProjectMemoryFn?: Parameters<typeof registerLegalWorkflowRoutes>[1]["searchProjectMemoryFn"];
+} = {}) {
   const defaultStore = new FakeTaskStore();
   const agents = new FakeAgentStore();
   const app = express();
@@ -141,9 +146,10 @@ function buildApp(options: { courtListenerClient?: CourtListenerClient; projectS
   } as unknown as ApiRoutesContext;
   registerLegalWorkflowRoutes(ctx, {
     createAgentStore: () => agents,
-    mcpClientFactory: async ({ provider }) => provider === "qmd"
+    mcpClientFactory: options.mcpClientFactory ?? (async ({ provider }) => provider === "qmd"
       ? { client: new FakeMcpClient([{ name: "search" }], [{ path: "vault/qmd.md", excerpt: "Source cites 410 U.S. 113." }]), mcpServerName: "qmd-mcp" }
-      : { client: new FakeMcpClient([{ name: "obsidian.search" }], [{ path: "vault/obsidian.md", excerpt: "No authorities here." }]), mcpServerName: "obsidian" },
+      : { client: new FakeMcpClient([{ name: "obsidian.search" }], [{ path: "vault/obsidian.md", excerpt: "No authorities here." }]), mcpServerName: "obsidian" }),
+    searchProjectMemoryFn: options.searchProjectMemoryFn,
     courtListenerClient: options.courtListenerClient ?? new FakeCourtListenerClient(),
   });
   app.use("/api", router);
@@ -182,12 +188,30 @@ describe("legal workflow CourtListener routes", () => {
     expect(store.researchStore.runs.some((run) => run.trigger === "legal-counter-lawsuit-courtlistener-validation" && run.sources.length > 0)).toBe(true);
   });
 
-  it("rejects invalid retry payloads and returns 404 for unknown runs", async () => {
+  it("returns explicit no-candidate authority validation status", async () => {
+    const { app } = buildApp({
+      mcpClientFactory: async () => null,
+      searchProjectMemoryFn: async () => [],
+    });
+    const body = JSON.stringify({ matterName: "Acme", requestedArtifacts: ["research-memo"], safeguards });
+    const launch = await request(app, "POST", "/api/legal-workflows/counter-lawsuit/runs", body, { "Content-Type": "application/json" });
+    expect(launch.status).toBe(201);
+    expect((launch.body as any).authorityValidation).toMatchObject({ status: "no-candidates", candidateCount: 0, validatedCount: 0 });
+    expect((launch.body as any).authorityValidation.safetyNotice).toContain("not filing readiness");
+  });
+
+  it("rejects invalid and oversized retry payloads and returns 404 for unknown runs", async () => {
     const { app } = buildApp();
     const launch = await request(app, "POST", "/api/legal-workflows/counter-lawsuit/runs", launchBody(), { "Content-Type": "application/json" });
     const runId = (launch.body as any).runId;
     const invalid = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/authority-validation`, JSON.stringify({ citations: "bad", token: "not allowed" }), { "Content-Type": "application/json" });
     expect(invalid.status).toBe(400);
+
+    const oversized = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/authority-validation`, JSON.stringify({ citations: Array.from({ length: 26 }, (_, index) => `${index + 1} U.S. 1`) }), { "Content-Type": "application/json" });
+    expect(oversized.status).toBe(400);
+
+    const longText = await request(app, "POST", `/api/legal-workflows/counter-lawsuit/runs/${runId}/authority-validation`, JSON.stringify({ text: "x".repeat(8_001) }), { "Content-Type": "application/json" });
+    expect(longText.status).toBe(400);
 
     const unknown = await request(app, "POST", "/api/legal-workflows/counter-lawsuit/runs/CLW-missing/authority-validation", JSON.stringify({ citations: ["1 U.S. 1"] }), { "Content-Type": "application/json" });
     expect(unknown.status).toBe(404);

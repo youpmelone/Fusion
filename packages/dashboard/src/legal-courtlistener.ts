@@ -422,14 +422,14 @@ function pushCandidate(params: {
   const input = boundedText(params.value);
   if (!input) return;
   if (input.length < 3) {
-    params.rejected.push({ input, inputType: params.inputType, source: params.source, reason: "candidate too short" });
+    if (params.rejected.length < HARD_MAX_CANDIDATES) params.rejected.push({ input, inputType: params.inputType, source: params.source, reason: "candidate too short" });
     return;
   }
   const key = `${params.inputType}:${input.toLowerCase()}`;
   if (params.seen.has(key)) return;
   params.seen.add(key);
   if (params.candidates.length >= params.maxCandidates) {
-    params.rejected.push({ input, inputType: params.inputType, source: params.source, reason: "candidate limit exceeded" });
+    if (params.rejected.length < HARD_MAX_CANDIDATES) params.rejected.push({ input, inputType: params.inputType, source: params.source, reason: "candidate limit exceeded" });
     return;
   }
   params.candidates.push({ input, inputType: params.inputType, source: params.source });
@@ -613,11 +613,16 @@ export function validateCourtListenerRetryRequest(input: unknown): Partial<Court
   for (const key of ["citations", "queries"] as const) {
     if (record[key] === undefined) continue;
     if (!Array.isArray(record[key])) validationBadRequest(`${key} must be an array of non-empty strings`);
+    if ((record[key] as unknown[]).length > HARD_MAX_CANDIDATES) validationBadRequest(`${key} must contain at most ${HARD_MAX_CANDIDATES} items`);
     for (const value of record[key] as unknown[]) {
       if (typeof value !== "string" || !value.trim()) validationBadRequest(`${key} must contain only non-empty strings`);
+      if (value.length > MAX_INPUT_CHARS) validationBadRequest(`${key} entries must be at most ${MAX_INPUT_CHARS} characters`);
     }
   }
-  if (record.text !== undefined && typeof record.text !== "string") validationBadRequest("text must be a string");
+  if (record.text !== undefined) {
+    if (typeof record.text !== "string") validationBadRequest("text must be a string");
+    if (record.text.length > MAX_TEXT_SCAN_CHARS) validationBadRequest(`text must be at most ${MAX_TEXT_SCAN_CHARS} characters`);
+  }
   for (const [key, hardMax] of [["maxCandidates", HARD_MAX_CANDIDATES], ["maxResultsPerCandidate", HARD_MAX_RESULTS_PER_CANDIDATE]] as const) {
     if (record[key] !== undefined && (typeof record[key] !== "number" || !Number.isInteger(record[key]) || record[key] < 1 || record[key] > hardMax)) {
       validationBadRequest(`${key} must be an integer between 1 and ${hardMax}`);

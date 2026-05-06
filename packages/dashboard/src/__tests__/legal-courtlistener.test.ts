@@ -10,6 +10,7 @@ import {
   normalizeCourtListenerAuthorityRecord,
   validateAuthorityCandidatesWithCourtListener,
   validateCounterLawsuitAuthorities,
+  validateCourtListenerRetryRequest,
   type CourtListenerClient,
 } from "../legal-courtlistener.js";
 
@@ -340,6 +341,14 @@ describe("CourtListener authority validation service", () => {
     const result = await validateAuthorityCandidatesWithCourtListener({ client: new FakeCourtListenerClient({}), request: { text: "No legal authority here." } });
     expect(result.status).toBe("no-candidates");
     expect(result.diagnostics[0].message).toContain("No bounded citation or authority candidates");
+  });
+});
+
+describe("CourtListener retry payload validation", () => {
+  it("rejects oversized public retry payloads", () => {
+    expect(() => validateCourtListenerRetryRequest({ citations: Array.from({ length: 26 }, (_, index) => `${index + 1} U.S. 1`) })).toThrow(/at most 25/);
+    expect(() => validateCourtListenerRetryRequest({ queries: ["x".repeat(301)] })).toThrow(/at most 300/);
+    expect(() => validateCourtListenerRetryRequest({ text: "x".repeat(8_001) })).toThrow(/at most 8000/);
   });
 });
 
