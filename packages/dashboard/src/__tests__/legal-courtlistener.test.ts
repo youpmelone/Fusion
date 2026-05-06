@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ResearchRun, Task, TaskDocument } from "@fusion/core";
 import {
   COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY,
+  COURTLISTENER_STATUS_DOCUMENT_KEY,
+  COURTLISTENER_RESEARCH_TRIGGER,
   createCourtListenerClient,
+  deriveAuthorityValidationStatusForRun,
   extractCourtListenerAuthorityCandidates,
   normalizeCourtListenerAuthorityRecord,
   validateAuthorityCandidatesWithCourtListener,
+  validateCounterLawsuitAuthorities,
   type CourtListenerClient,
 } from "../legal-courtlistener.js";
 
@@ -27,6 +32,86 @@ class FakeCourtListenerClient implements CourtListenerClient {
     return this.raw;
   }
 }
+
+function makeTask(id: string, stage: string, runId = "CLW-1"): Task {
+  return {
+    id,
+    title: stage,
+    description: stage,
+    priority: "high",
+    column: "todo",
+    dependencies: [],
+    steps: [],
+    currentStep: 0,
+    log: [],
+    createdAt: "2026-05-06T00:00:00.000Z",
+    updatedAt: "2026-05-06T00:00:00.000Z",
+    sourceMetadata: {
+      workflowKind: "counter-lawsuit-prototype",
+      workflowRunId: runId,
+      workflowStage: stage,
+      workflowStageIndex: stage === "research-memo" ? 0 : 1,
+    },
+  };
+}
+
+class FakeResearchStore {
+  runs: ResearchRun[] = [];
+  createRun(input: any): ResearchRun {
+    const run = {
+      id: `RR-${this.runs.length + 1}`,
+      query: input.query,
+      topic: input.topic,
+      status: "queued",
+      trigger: input.trigger,
+      sources: input.sources ?? [],
+      events: [],
+      tags: input.tags ?? [],
+      metadata: input.metadata,
+      lifecycle: input.lifecycle,
+      createdAt: "2026-05-06T00:00:00.000Z",
+      updatedAt: "2026-05-06T00:00:00.000Z",
+    } as ResearchRun;
+    this.runs.push(run);
+    return run;
+  }
+  updateStatus(id: string, status: ResearchRun["status"], extra?: Partial<ResearchRun>): void {
+    const run = this.runs.find((candidate) => candidate.id === id);
+    if (!run) throw new Error("missing run");
+    Object.assign(run, extra ?? {}, { status });
+  }
+}
+
+class FakeTaskStore {
+  tasks = [makeTask("FN-1", "research-memo"), makeTask("FN-2", "evidence-ledger")];
+  documents = new Map<string, TaskDocument>();
+  researchStore = new FakeResearchStore();
+
+  constructor() {
+    this.documents.set("FN-1:counter-lawsuit-stage", {
+      id: "DOC-STAGE",
+      taskId: "FN-1",
+      key: "counter-lawsuit-stage",
+      content: "# Stage\n",
+      revision: 1,
+      author: "fusion",
+      createdAt: "now",
+      updatedAt: "now",
+    } as TaskDocument);
+  }
+
+  async listTasks(): Promise<Task[]> { return this.tasks; }
+  async upsertTaskDocument(taskId: string, input: { key: string; content: string; author?: string; metadata?: Record<string, unknown> }): Promise<TaskDocument> {
+    const doc = { id: `${taskId}:${input.key}`, taskId, key: input.key, content: input.content, revision: 1, author: input.author ?? "fusion", metadata: input.metadata, createdAt: "now", updatedAt: "now" } as TaskDocument;
+    this.documents.set(`${taskId}:${input.key}`, doc);
+    return doc;
+  }
+  async getTaskDocument(taskId: string, key: string): Promise<TaskDocument | null> {
+    return this.documents.get(`${taskId}:${key}`) ?? null;
+  }
+  getResearchStore(): FakeResearchStore { return this.researchStore; }
+}
+
 
 describe("CourtListener API client", () => {
   it("adds auth header only when a token is configured", async () => {
@@ -255,5 +340,80 @@ describe("CourtListener authority validation service", () => {
     const result = await validateAuthorityCandidatesWithCourtListener({ client: new FakeCourtListenerClient({}), request: { text: "No legal authority here." } });
     expect(result.status).toBe("no-candidates");
     expect(result.diagnostics[0].message).toContain("No bounded citation or authority candidates");
+  });
+});
+
+describe("counter-lawsuit CourtListener persistence", () => {
+  it("persists matched authorities to ResearchStore and task documents", async () => {
+    const store = new FakeTaskStore();
+    store.documents.set("FN-1:vault-mining-receipts", {
+      id: "DOC-VAULT",
+      taskId: "FN-1",
+      key: "vault-mining-receipts",
+      content: "# receipts",
+      metadata: { receipts: [{ receiptId: "LVR-1", query: "Roe v Wade", excerpt: "Source cites 410 U.S. 113." }] },
+      revision: 1,
+      author: "fusion",
+      createdAt: "now",
+      updatedAt: "now",
+    } as TaskDocument);
+
+    const result = await validateCounterLawsuitAuthorities({
+      taskStore: store as any,
+      runId: "CLW-1",
+      client: new FakeCourtListenerClient({ "410 U.S. 113": [{ case_name: "Roe v. Wade", citation: "410 U.S. 113", absolute_url: "/opinion/108713/roe-v-wade/" }] }),
+      now: () => new Date("2026-05-06T00:00:00.000Z"),
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.researchRunId).toBe("RR-1");
+    expect(store.researchStore.runs[0].trigger).toBe(COURTLISTENER_RESEARCH_TRIGGER);
+    expect(store.researchStore.runs[0].sources).toHaveLength(2);
+    expect(store.researchStore.runs[0].sources[0]).toMatchObject({ type: "web", reference: "https://www.courtlistener.com/opinion/108713/roe-v-wade/" });
+    expect(store.researchStore.runs[0].sources[0].metadata?.courtListenerAuthorityValidation).toMatchObject({ legalConclusionVerified: false, promoted: false });
+
+    const manifest = await store.getTaskDocument("FN-1", COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY);
+    expect(manifest?.content).toContain("CourtListener authority validation");
+    expect(manifest?.content).toContain("not good-law verification");
+    expect(manifest?.content).toContain("legalConclusionVerified: false");
+    expect(JSON.stringify(manifest?.metadata)).not.toContain("super-secret-token");
+
+    const status = await store.getTaskDocument("FN-1", COURTLISTENER_STATUS_DOCUMENT_KEY);
+    expect(status?.content).toContain("Retry needed: no");
+
+    const derived = await deriveAuthorityValidationStatusForRun({ taskStore: store as any, runId: "CLW-1" });
+    expect(derived).toMatchObject({ status: "completed", candidateCount: 2, validatedCount: 2, unmatchedCount: 0, researchRunId: "RR-1" });
+  });
+
+  it("writes explicit no-candidate status without treating it as success", async () => {
+    const store = new FakeTaskStore();
+    const result = await validateCounterLawsuitAuthorities({
+      taskStore: store as any,
+      runId: "CLW-1",
+      client: new FakeCourtListenerClient({ results: [] }),
+    });
+
+    expect(result.status).toBe("no-candidates");
+    expect(result.validatedCount).toBe(0);
+    expect(store.researchStore.runs[0].sources).toHaveLength(0);
+    const status = await store.getTaskDocument("FN-1", COURTLISTENER_STATUS_DOCUMENT_KEY);
+    expect(status?.content).toContain("Retry needed: yes");
+    expect(status?.content).toContain("No bounded citation or authority candidates");
+  });
+
+  it("persists unavailable diagnostics redacted and does not mark legal conclusions verified", async () => {
+    const store = new FakeTaskStore();
+    const result = await validateCounterLawsuitAuthorities({
+      taskStore: store as any,
+      runId: "CLW-1",
+      request: { citations: ["1 U.S. 1"] },
+      client: new FakeCourtListenerClient({}, true),
+    });
+
+    expect(result.status).toBe("unavailable");
+    expect(result.validationRecords[0]).toMatchObject({ status: "unavailable", legalConclusionVerified: false, promoted: false });
+    const manifest = await store.getTaskDocument("FN-1", COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY);
+    expect(JSON.stringify(manifest)).not.toContain("super-secret-token");
+    expect(manifest?.content).toContain("not attorney judgment");
   });
 });

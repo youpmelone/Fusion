@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import type { TaskDocument } from "@fusion/core";
+import type { ResearchRun, ResearchStore, ResearchSource, Task, TaskDocument, TaskStore } from "@fusion/core";
+import { badRequest, notFound } from "./api-error.js";
+import { VAULT_MINING_RECEIPTS_DOCUMENT_KEY } from "./legal-vault-mining.js";
+import {
+  COUNTER_LAWSUIT_STAGE_DOCUMENT_KEY,
+  COUNTER_LAWSUIT_WORKFLOW_KIND,
+  type CounterLawsuitWorkflowLaunchInput,
+} from "./legal-workflow-orchestrator.js";
 
 export const COURTLISTENER_DEFAULT_BASE_URL = "https://www.courtlistener.com/api/rest/v4";
 export const COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY = "courtlistener-authority-validation";
@@ -561,6 +568,304 @@ export async function validateAuthorityCandidatesWithCourtListener(params: {
     diagnostics,
     authorityValidationDocumentKey: COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY,
     statusDocumentKey: COURTLISTENER_STATUS_DOCUMENT_KEY,
+    safetyNotice: COURTLISTENER_SAFETY_NOTICE,
+  };
+}
+
+export interface ValidateCounterLawsuitAuthoritiesOptions {
+  taskStore: Pick<TaskStore, "listTasks" | "upsertTaskDocument" | "getTaskDocument" | "getResearchStore">;
+  runId: string;
+  launchInput?: CounterLawsuitWorkflowLaunchInput;
+  request?: Partial<CourtListenerAuthorityValidationRequest>;
+  client?: CourtListenerClient;
+  clientFactory?: () => CourtListenerClient;
+  now?: () => Date;
+}
+
+function taskMatchesRun(task: Task, runId: string): boolean {
+  return task.sourceMetadata?.workflowKind === COUNTER_LAWSUIT_WORKFLOW_KIND
+    && task.sourceMetadata?.workflowRunId === runId;
+}
+
+function findResearchMemoTask(tasks: Task[]): Task | undefined {
+  return tasks.find((task) => task.sourceMetadata?.workflowStage === "research-memo");
+}
+
+function validationBadRequest(message: string): never {
+  throw badRequest(message);
+}
+
+export function validateCourtListenerRetryRequest(input: unknown): Partial<CourtListenerAuthorityValidationRequest> {
+  if (input === undefined || input === null || (typeof input === "object" && !Array.isArray(input) && Object.keys(input as Record<string, unknown>).length === 0)) {
+    return {};
+  }
+  if (!input || typeof input !== "object" || Array.isArray(input)) validationBadRequest("authority validation request body must be an object");
+  const record = input as Record<string, unknown>;
+  const allowed = new Set(["citations", "queries", "text", "maxCandidates", "maxResultsPerCandidate"]);
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) validationBadRequest(`invalid authority validation field: ${key}`);
+  }
+  for (const key of ["citations", "queries"] as const) {
+    if (record[key] === undefined) continue;
+    if (!Array.isArray(record[key])) validationBadRequest(`${key} must be an array of non-empty strings`);
+    for (const value of record[key] as unknown[]) {
+      if (typeof value !== "string" || !value.trim()) validationBadRequest(`${key} must contain only non-empty strings`);
+    }
+  }
+  if (record.text !== undefined && typeof record.text !== "string") validationBadRequest("text must be a string");
+  for (const [key, hardMax] of [["maxCandidates", HARD_MAX_CANDIDATES], ["maxResultsPerCandidate", HARD_MAX_RESULTS_PER_CANDIDATE]] as const) {
+    if (record[key] !== undefined && (typeof record[key] !== "number" || !Number.isInteger(record[key]) || record[key] < 1 || record[key] > hardMax)) {
+      validationBadRequest(`${key} must be an integer between 1 and ${hardMax}`);
+    }
+  }
+  return {
+    citations: record.citations as string[] | undefined,
+    queries: record.queries as string[] | undefined,
+    text: record.text as string | undefined,
+    maxCandidates: record.maxCandidates as number | undefined,
+    maxResultsPerCandidate: record.maxResultsPerCandidate as number | undefined,
+  };
+}
+
+function parseJsonBlock(content: string): Record<string, unknown> | undefined {
+  const match = content.match(/```json\s*([\s\S]*?)```/);
+  if (!match) return undefined;
+  try {
+    const parsed = JSON.parse(match[1]) as unknown;
+    return asRecord(parsed);
+  } catch {
+    return undefined;
+  }
+}
+
+function receiptsFromVaultDocument(document: TaskDocument | null): Array<Record<string, unknown>> {
+  if (!document) return [];
+  if (Array.isArray(document.metadata?.receipts)) return document.metadata.receipts as Array<Record<string, unknown>>;
+  const parsed = parseJsonBlock(document.content);
+  return Array.isArray(parsed?.receipts) ? parsed.receipts as Array<Record<string, unknown>> : [];
+}
+
+async function stageDocumentsForTasks(
+  taskStore: Pick<TaskStore, "getTaskDocument">,
+  tasks: Task[],
+): Promise<TaskDocument[]> {
+  const documents: TaskDocument[] = [];
+  for (const task of tasks) {
+    const doc = await taskStore.getTaskDocument(task.id, COUNTER_LAWSUIT_STAGE_DOCUMENT_KEY).catch(() => null);
+    if (doc) documents.push(doc);
+  }
+  return documents;
+}
+
+function buildAuthorityValidationDocument(result: CourtListenerAuthorityValidationResult): string {
+  return `# CourtListener authority validation
+
+${COURTLISTENER_SAFETY_NOTICE}
+
+- Research run ID: ${result.researchRunId ?? "not persisted"}
+- Candidates checked: ${result.candidateCount}
+- Matched authorities: ${result.validatedCount}
+- Unmatched, ambiguous, or unavailable authorities: ${result.unmatchedCount}
+- Status: ${result.status}
+
+## Validation records
+${result.validationRecords.map((record) => `- ${record.recordId} — ${record.input} — ${record.status} — legalConclusionVerified: false — promoted: false`).join("\n") || "None"}
+
+## Machine-readable manifest
+
+\`\`\`json
+${JSON.stringify({
+    safetyNotice: COURTLISTENER_SAFETY_NOTICE,
+    researchRunId: result.researchRunId,
+    candidates: result.candidates,
+    validationRecords: result.validationRecords,
+    rejectedCandidates: result.rejectedCandidates,
+    diagnostics: result.diagnostics,
+  }, null, 2)}
+\`\`\`
+`;
+}
+
+function buildCourtListenerStatusDocument(result: CourtListenerAuthorityValidationResult): string {
+  return `# CourtListener authority validation status
+
+Status: ${result.status}
+
+${COURTLISTENER_SAFETY_NOTICE}
+
+- Research run ID: ${result.researchRunId ?? "none"}
+- Candidate count: ${result.candidateCount}
+- Matched authorities: ${result.validatedCount}
+- Unmatched, ambiguous, or unavailable authorities: ${result.unmatchedCount}
+- Retry needed: ${result.status !== "completed" ? "yes" : "no"}
+- Diagnostics:
+${result.diagnostics.map((diagnostic) => `  - ${diagnostic.providerName}: ${diagnostic.status} — ${diagnostic.message}`).join("\n") || "  - none"}
+`;
+}
+
+function persistCourtListenerResearchRun(params: {
+  researchStore: Pick<ResearchStore, "createRun" | "updateStatus">;
+  runId: string;
+  result: CourtListenerAuthorityValidationResult;
+}): ResearchRun {
+  const sources: ResearchSource[] = params.result.validationRecords
+    .filter((record) => record.status === "matched")
+    .map((record) => ({
+      id: record.recordId,
+      type: "web",
+      reference: record.courtListenerUrl ?? record.absoluteUrl ?? `courtlistener:${record.input}`,
+      title: record.caseName ?? record.normalizedCitation ?? record.input,
+      excerpt: boundedText(`${record.normalizedCitation ?? record.input}${record.caseName ? ` — ${record.caseName}` : ""}`, 500),
+      content: boundedText(`${record.normalizedCitation ?? record.input}${record.caseName ? ` — ${record.caseName}` : ""}`, 500),
+      status: "completed",
+      fetchedAt: record.retrievedAt,
+      metadata: { courtListenerAuthorityValidation: record },
+    }));
+  const run = params.researchStore.createRun({
+    query: params.result.candidates.map((candidate) => candidate.input).join(" | ") || "CourtListener authority validation",
+    topic: "Counter-lawsuit CourtListener authority validation",
+    trigger: COURTLISTENER_RESEARCH_TRIGGER,
+    sources,
+    tags: ["legal-workflow", "counter-lawsuit", "courtlistener"],
+    metadata: {
+      workflowRunId: params.runId,
+      candidateCount: params.result.candidateCount,
+      validatedCount: params.result.validatedCount,
+      unmatchedCount: params.result.unmatchedCount,
+      providerDiagnostics: params.result.diagnostics,
+      safetyNotice: COURTLISTENER_SAFETY_NOTICE,
+    },
+    lifecycle: { maxAttempts: 1 },
+  });
+  const now = new Date().toISOString();
+  params.researchStore.updateStatus(run.id, "running", { startedAt: now });
+  params.researchStore.updateStatus(run.id, "completed", { completedAt: now });
+  return { ...run, status: "completed", startedAt: now, completedAt: now, sources };
+}
+
+export async function validateCounterLawsuitAuthorities(options: ValidateCounterLawsuitAuthoritiesOptions): Promise<CourtListenerAuthorityValidationResult> {
+  const tasks = (await options.taskStore.listTasks({ includeArchived: true } as never))
+    .filter((task) => taskMatchesRun(task, options.runId));
+  if (tasks.length === 0) throw notFound(`Legal workflow run ${options.runId} not found`);
+  const researchMemoTask = findResearchMemoTask(tasks);
+  if (!researchMemoTask) throw notFound(`Legal workflow run ${options.runId} has no research-memo stage task`);
+
+  const vaultDoc = await options.taskStore.getTaskDocument(researchMemoTask.id, VAULT_MINING_RECEIPTS_DOCUMENT_KEY).catch(() => null);
+  const vaultReceipts = receiptsFromVaultDocument(vaultDoc);
+  const stageDocuments = await stageDocumentsForTasks(options.taskStore, tasks);
+  const client = options.client ?? options.clientFactory?.() ?? createCourtListenerClient();
+  const request: CourtListenerAuthorityValidationRequest = {
+    runId: options.runId,
+    citations: options.request?.citations,
+    queries: options.request?.queries,
+    text: options.request?.text,
+    launchFocus: typeof options.launchInput?.focus === "string" ? options.launchInput.focus : undefined,
+    launchSourceQuery: typeof options.launchInput?.sourceQuery === "string" ? options.launchInput.sourceQuery : undefined,
+    vaultReceipts,
+    stageDocuments,
+    maxCandidates: options.request?.maxCandidates,
+    maxResultsPerCandidate: options.request?.maxResultsPerCandidate,
+  };
+
+  const rawResult = await validateAuthorityCandidatesWithCourtListener({ client, request, now: options.now });
+  const researchRun = persistCourtListenerResearchRun({
+    researchStore: options.taskStore.getResearchStore(),
+    runId: options.runId,
+    result: rawResult,
+  });
+  const result: CourtListenerAuthorityValidationResult = {
+    ...rawResult,
+    researchRunId: researchRun.id,
+    statusDocumentKey: COURTLISTENER_STATUS_DOCUMENT_KEY,
+  };
+
+  await options.taskStore.upsertTaskDocument(researchMemoTask.id, {
+    key: COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY,
+    content: buildAuthorityValidationDocument(result),
+    author: "fusion-legal-courtlistener",
+    metadata: {
+      workflowKind: COUNTER_LAWSUIT_WORKFLOW_KIND,
+      workflowRunId: options.runId,
+      researchRunId: researchRun.id,
+      candidates: result.candidates,
+      validationRecords: result.validationRecords,
+      rejectedCandidates: result.rejectedCandidates,
+      diagnostics: result.diagnostics,
+      safetyNotice: COURTLISTENER_SAFETY_NOTICE,
+    },
+  });
+
+  await options.taskStore.upsertTaskDocument(researchMemoTask.id, {
+    key: COURTLISTENER_STATUS_DOCUMENT_KEY,
+    content: buildCourtListenerStatusDocument(result),
+    author: "fusion-legal-courtlistener",
+    metadata: {
+      workflowKind: COUNTER_LAWSUIT_WORKFLOW_KIND,
+      workflowRunId: options.runId,
+      researchRunId: researchRun.id,
+      status: result.status,
+      candidateCount: result.candidateCount,
+      validatedCount: result.validatedCount,
+      unmatchedCount: result.unmatchedCount,
+      diagnostics: result.diagnostics,
+      safetyNotice: COURTLISTENER_SAFETY_NOTICE,
+    },
+  });
+
+  const existingStageDoc = await options.taskStore.getTaskDocument(researchMemoTask.id, COUNTER_LAWSUIT_STAGE_DOCUMENT_KEY).catch(() => null);
+  if (existingStageDoc && !existingStageDoc.content.includes(COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY)) {
+    await options.taskStore.upsertTaskDocument(researchMemoTask.id, {
+      key: COUNTER_LAWSUIT_STAGE_DOCUMENT_KEY,
+      content: `${existingStageDoc.content}\n\n## CourtListener authority validation manifest\nRead task document key \`${COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY}\` when authorities or citations are present. Treat missing, unmatched, ambiguous, or unavailable CourtListener results as unresolved authority gaps. CourtListener lookup does not verify legal conclusions, good-law status, filing readiness, or attorney judgment. Never invent citations.`,
+      author: "fusion-legal-courtlistener",
+      metadata: existingStageDoc.metadata,
+    });
+  }
+
+  return result;
+}
+
+export async function deriveAuthorityValidationStatusForRun(params: {
+  taskStore: Pick<TaskStore, "listTasks" | "getTaskDocument">;
+  runId: string;
+}): Promise<{
+  runId: string;
+  status: CourtListenerValidationStatus | "not-run";
+  researchRunId?: string;
+  candidateCount: number;
+  validatedCount: number;
+  unmatchedCount: number;
+  diagnostics: CourtListenerProviderDiagnostic[];
+  authorityValidationDocumentKey?: string;
+  statusDocumentKey?: string;
+  safetyNotice: typeof COURTLISTENER_SAFETY_NOTICE;
+}> {
+  const tasks = (await params.taskStore.listTasks({ includeArchived: true } as never)).filter((task) => taskMatchesRun(task, params.runId));
+  const researchMemoTask = findResearchMemoTask(tasks);
+  if (!researchMemoTask) {
+    return { runId: params.runId, status: "not-run", candidateCount: 0, validatedCount: 0, unmatchedCount: 0, diagnostics: [], safetyNotice: COURTLISTENER_SAFETY_NOTICE };
+  }
+  const doc = await params.taskStore.getTaskDocument(researchMemoTask.id, COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY).catch(() => null);
+  const statusDoc = await params.taskStore.getTaskDocument(researchMemoTask.id, COURTLISTENER_STATUS_DOCUMENT_KEY).catch(() => null);
+  if (!doc) {
+    return { runId: params.runId, status: "not-run", candidateCount: 0, validatedCount: 0, unmatchedCount: 0, diagnostics: [], safetyNotice: COURTLISTENER_SAFETY_NOTICE };
+  }
+  const metadata = doc.metadata ?? {};
+  const records = Array.isArray(metadata.validationRecords) ? metadata.validationRecords as CourtListenerAuthorityValidationRecord[] : [];
+  const diagnostics = Array.isArray(metadata.diagnostics) ? metadata.diagnostics as CourtListenerProviderDiagnostic[] : [];
+  const status = ["completed", "partial", "unavailable", "no-candidates", "failed"].includes(String(statusDoc?.metadata?.status))
+    ? statusDoc?.metadata?.status as CourtListenerValidationStatus
+    : records.some((record) => record.status === "matched") && records.every((record) => record.status === "matched") ? "completed" : "partial";
+  return {
+    runId: params.runId,
+    status,
+    researchRunId: typeof metadata.researchRunId === "string" ? metadata.researchRunId : undefined,
+    candidateCount: Array.isArray(metadata.candidates) ? metadata.candidates.length : records.length,
+    validatedCount: records.filter((record) => record.status === "matched").length,
+    unmatchedCount: records.filter((record) => record.status !== "matched").length,
+    diagnostics,
+    authorityValidationDocumentKey: COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY,
+    statusDocumentKey: statusDoc ? COURTLISTENER_STATUS_DOCUMENT_KEY : undefined,
     safetyNotice: COURTLISTENER_SAFETY_NOTICE,
   };
 }
