@@ -417,6 +417,11 @@ describe("generated legal workflow prompts", () => {
       expect(task.description).toContain("not citation-format validation");
       expect(task.description).toContain("not filing-ready");
       expect(task.description).toContain("not promoted for filing");
+      expect(task.description).toContain("draft-only research memo");
+      expect(task.description).toContain("draft-only evidence ledger");
+      expect(task.description).toContain("draft-only claim map");
+      expect(task.description).toContain("draft-only complaint");
+      expect(task.description).toContain("draft-only red-team report");
       expect(task.description).toContain("explicitly mark the affected facts, evidence, authorities, or receipts as unverified");
       expect(task.description).toContain("Do not invent citations, quotes, docket entries, CourtListener matches, or source receipts");
       expect(task.description).toContain(`Write the primary output to task document key \`${expectedDocumentKey}\``);
@@ -500,6 +505,11 @@ describe("generated legal workflow prompts", () => {
     expect(stageDocumentContent).toContain("not verified facts");
     expect(stageDocumentContent).toContain("not human verification");
     expect(stageDocumentContent).toContain("not promoted for filing");
+    expect(stageDocumentContent).toContain("draft-only research memo");
+    expect(stageDocumentContent).toContain("draft-only evidence ledger");
+    expect(stageDocumentContent).toContain("draft-only claim map");
+    expect(stageDocumentContent).toContain("draft-only complaint");
+    expect(stageDocumentContent).toContain("draft-only red-team report");
     expect(stageDocumentContent).not.toMatch(/verified and reliable/i);
     expect(stageDocumentContent).not.toMatch(/ready for filing/i);
     for (const key of ["research-memo", "evidence-ledger", "claim-map", "draft-counter-lawsuit-complaint", "red-team-report", "lineage-scoring-log"]) {
