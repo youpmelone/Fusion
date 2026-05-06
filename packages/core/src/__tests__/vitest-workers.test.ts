@@ -56,4 +56,15 @@ describe("computeMaxWorkers", () => {
     expect(workers).toBe(Math.min(2, cpuCap()));
     expect(process.env.VITEST_MAX_WORKERS).toBe(String(workers));
   });
+
+  it("honors a package-specific max cap after env worker resolution", () => {
+    process.env.VITEST_MAX_WORKERS = "4";
+    process.env.FUSION_TEST_TOTAL_WORKERS = "8";
+    process.env.FUSION_TEST_CONCURRENCY = "2";
+
+    const workers = computeMaxWorkers({ defaultCap: 2, maxCap: 1 });
+
+    expect(workers).toBe(1);
+    expect(process.env.VITEST_MAX_WORKERS).toBe("1");
+  });
 });

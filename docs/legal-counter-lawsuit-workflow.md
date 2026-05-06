@@ -90,6 +90,20 @@ The response keeps the FN-001 dashboard contract and adds orchestration details:
     diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string }>;
     safetyNotice: string;
   };
+  evidenceLedger: {
+    runId: string;
+    status: "completed" | "partial" | "blocked" | "failed" | "not-run";
+    ledgerDocumentKey?: "evidence-ledger";
+    statusDocumentKey?: "evidence-ledger-status";
+    factCount: number;
+    sourceLinkCount: number;
+    claimLinkCount: number;
+    unresolvedGapCount: number;
+    citationStatusCounts: Record<string, number>;
+    confidenceCounts: Record<"high" | "medium" | "low" | "unsupported", number>;
+    diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string; factId?: string }>;
+    safetyNotice: string;
+  };
 }
 ```
 
@@ -100,6 +114,8 @@ After stage tasks are created, the server attempts one bounded synchronous QMD M
 After vault mining is attempted, Fusion also runs a bounded CourtListener authority-validation pass when launch text, explicit retry candidates, vault receipts, or stage documents provide citation or authority candidates. CourtListener failure also does not roll back the workflow run. Missing, unmatched, ambiguous, unavailable, or no-candidate results remain visible in `authorityValidation` and are not treated as legal success.
 
 After vault mining and CourtListener validation are attempted, Fusion generates the first downstream artifact: a draft `research-memo` task document on the research-memo stage task. The memo is deterministic from persisted `vault-mining-receipts`, `vault-mining-status`, `courtlistener-authority-validation`, and `courtlistener-status` documents. API callers cannot submit memo text, legal conclusions, source manifests, source paths, CourtListener records, external command configuration, tokens, headers, or raw fetch options.
+
+After research memo generation is attempted, Fusion generates the structured `evidence-ledger` task document on the evidence-ledger stage task. The ledger is deterministic from persisted `research-memo` and `research-memo-status` documents only. API callers cannot submit ledger text, fact rows, claim mappings, confidence scores, citation statuses, source manifests, source paths, CourtListener records, external command configuration, tokens, headers, or raw fetch options.
 
 ## Vault-mining MCP setup
 
@@ -200,6 +216,26 @@ Unknown fields return `400`. Unknown run IDs return `404`.
 
 The response shape is the same `researchMemo` summary returned by launch and status. `force: true` asks Fusion to regenerate from the persisted prerequisite documents, but it still does not accept generated memo text, conclusions, source paths, CourtListener records, or external provider configuration from the request body.
 
+## Evidence ledger retry API
+
+Generate or retry the structured evidence ledger for an existing run with:
+
+```http
+POST /api/legal-workflows/counter-lawsuit/runs/:runId/evidence-ledger
+```
+
+The request body accepts only:
+
+```ts
+{
+  force?: boolean;
+}
+```
+
+Unknown fields return `400`. Unknown run IDs return `404`.
+
+The response shape is the same `evidenceLedger` summary returned by launch and status. `force: true` asks Fusion to regenerate from persisted research memo documents, but it still does not accept generated ledger text, fact rows, claim mappings, confidence scores, source paths, citation statuses, CourtListener records, or provider configuration from the request body.
+
 ## Status API
 
 Fetch derived run status with:
@@ -208,11 +244,13 @@ Fetch derived run status with:
 GET /api/legal-workflows/counter-lawsuit/runs/:runId
 ```
 
-The status endpoint finds tasks whose `sourceMetadata.workflowRunId` matches the run ID. It returns the stage task statuses, artifact keys, safety gates, source scope status, lineage document references, the current vault-mining summary, the current CourtListener authority-validation summary, and the current research memo summary.
+The status endpoint finds tasks whose `sourceMetadata.workflowRunId` matches the run ID. It returns the stage task statuses, artifact keys, safety gates, source scope status, lineage document references, the current vault-mining summary, the current CourtListener authority-validation summary, the current research memo summary, and the current evidence ledger summary.
 
 The `authorityValidation` status includes the research run ID, candidate count, matched count, unmatched/ambiguous/unavailable count, diagnostics, safety notice, and document key references for `courtlistener-authority-validation` and `courtlistener-status` when present.
 
 The `researchMemo` status includes status, memo document key, status document key when present, evidence count, authority count, conclusion count, source-path count, diagnostics, and safety notice. If only `research-memo-status` exists, status preserves that persisted blocker or failure instead of recomputing success from upstream prerequisites. If neither memo document exists, status is `not-run`.
+
+The `evidenceLedger` status includes status, ledger document key, status document key when present, fact count, source-link count, preliminary claim-link count, unresolved gap count, citation-status counts, confidence counts, diagnostics, and safety notice. If `evidence-ledger-status` reports blocked, partial, failed, stale, or unresolved prerequisites, status preserves that blocker instead of treating a stale primary ledger as completed support. If neither ledger document exists, status is `not-run`.
 
 Unknown run IDs return `404`.
 
@@ -239,7 +277,9 @@ The research memo task also receives `vault-mining-receipts` after mining runs. 
 
 After authority validation runs, the research memo task receives `courtlistener-authority-validation`. When CourtListener is unavailable, partial, has no candidates, has unmatched candidates, or needs retry, Fusion also writes `courtlistener-status`. Research memo prompts and downstream stage prompts instruct agents to read `courtlistener-authority-validation` when it exists and to treat missing, unmatched, ambiguous, or unavailable validation as unresolved authority gaps.
 
-After research memo generation runs, the research memo task receives `research-memo`. When generation is blocked, partial, or failed, Fusion also writes `research-memo-status`. Downstream stages read `research-memo` when it exists and treat `research-memo-status` blockers as unresolved prerequisites, not support.
+After research memo generation runs, the research memo task receives `research-memo`. When generation is blocked, partial, or failed, Fusion also writes `research-memo-status`. The evidence-ledger stage reads `research-memo` and treats `research-memo-status` blockers as unresolved prerequisites, not support.
+
+After evidence ledger generation runs, the evidence-ledger task receives `evidence-ledger`. When generation is blocked, partial, failed, or stale because of `research-memo-status`, Fusion also writes `evidence-ledger-status`. Claim-map and later stages read `evidence-ledger` when it exists and treat `evidence-ledger-status` blockers as unresolved prerequisites, not support.
 
 ## Vault-mining receipt schema
 
@@ -366,6 +406,48 @@ The memo is draft-only and source-linked only. It is not legal advice, not good-
 
 Raw MCP payloads, full note bodies, CourtListener raw payloads, authorization headers, API tokens, token-like provider errors, and unbounded provider errors are not persisted in the memo, memo status, metadata, or API responses.
 
+## Evidence ledger document schema
+
+The `evidence-ledger` document contains a human-readable structured ledger plus this machine-readable JSON manifest:
+
+```ts
+{
+  runId: string;
+  generatedAt: string;
+  status: "completed" | "partial" | "blocked" | "failed";
+  sourceDocuments: Array<{ taskId: string; key: "research-memo" | "research-memo-status"; present: boolean; parsedFrom?: string; status?: string }>;
+  researchMemoTaskId: string;
+  evidenceLedgerTaskId: string;
+  facts: Array<{
+    factId: string;
+    factText: string;                   // bounded and secret-redacted
+    sourceLinks: Array<{ sourceLinkId: string; receiptId: string; sourcePath: string; sourceSystem?: string; providerName?: string; toolName?: string }>;
+    claimLinks: Array<{ claimLinkId: string; conclusionId?: string; status: "upstream-research-memo-conclusion" | "unresolved-placeholder"; createsClaimMap: false }>;
+    authorityRecordIds: string[];
+    confidence: "high" | "medium" | "low" | "unsupported";
+    citationStatus: Array<{ status: "source-linked-local-evidence" | "matched-courtlistener-lookup-record" | "unresolved-authority-lookup-record" | "missing-source-link" | "needs-human-citation-verification"; unresolved: boolean; support: false }>;
+    unresolvedGap: boolean;
+    diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string }>;
+    verified: false;
+  }>;
+  sourceLinks: unknown[];
+  claimLinks: unknown[];
+  citationStatuses: unknown[];
+  confidenceRubric: Record<string, string>;
+  diagnostics: Array<{ code: string; severity: "info" | "warning" | "error"; message: string }>;
+  counts: { facts: number; sourceLinks: number; claimLinks: number; unresolvedGaps: number; citationStatuses: Record<string, number>; confidence: Record<string, number> };
+  safetyNotice: string;
+}
+```
+
+Facts are built only from safe research memo manifest fields: `evidence`, `authorities`, `conclusions`, `sourceDocuments`, `diagnostics`, and `safetyNotice`. The ledger preserves receipt IDs, source paths, preliminary links to upstream memo `conclusionId`s or explicit unresolved placeholders, authority record IDs, conservative confidence, citation status, unresolved gaps, and `verified: false`.
+
+The `evidence-ledger-status` document records blocked, partial, failed, or stale-blocker state with the same safe counts, diagnostics, document keys, and safety notice. Missing research memo output, malformed manifests, blocked `research-memo-status`, missing source paths, unmatched or ambiguous authorities, unavailable providers, and unsupported facts remain visible as diagnostics or unresolved citation-status entries.
+
+The ledger is draft-only and source-linked only. It is not legal advice, not verified fact support, not good-law verification, not citation-format validation, not filing-ready, not human verified, and not promoted for filing. It does not create the claim map, complaint draft, red-team report, lineage/scoring log, legal advice, citation validation, good-law verification, or filing-ready conclusions.
+
+Raw MCP payloads, full note bodies, CourtListener raw payloads, authorization headers, API tokens, token-like provider errors, and unbounded source text are not persisted in the ledger, ledger status, metadata, or API responses.
+
 ## Agents and Codex legal skills
 
 The server creates or reuses durable legal workflow agents. It does not create ephemeral runtime agents for this workflow.
@@ -380,7 +462,7 @@ Every generated stage task enables three prompt-mode pre-merge workflow steps:
 - Opposing-counsel red-team review
 - Lineage preservation
 
-The citation/source prompt checks `research-memo` for source-linked evidence, matched authorities when used as support, unresolved gaps, and lineage. It checks `research-memo-status` for unresolved blockers. It also checks `courtlistener-authority-validation` when legal authorities are cited and the document exists.
+The citation/source prompt checks `research-memo` for source-linked evidence, matched authorities when used as support, unresolved gaps, and lineage. It checks `research-memo-status` for unresolved blockers. It checks `evidence-ledger` for source-linked fact rows, preliminary claim links, confidence labels, citation status, unresolved gaps, and absence of positive promotion or filing-ready claims. It checks `evidence-ledger-status` for blocked, partial, failed, stale, or unresolved prerequisites. It also checks `courtlistener-authority-validation` when legal authorities are cited and the document exists.
 
 It requires `REQUEST REVISION` when an authority is used as support without a matched CourtListener record, or when missing, unmatched, ambiguous, or unavailable CourtListener results are presented as support. Explicitly labeled unverified authority notes may remain only as unresolved research gaps; they do not satisfy the completion gate as support.
 
@@ -394,8 +476,8 @@ When no `vaultScope`, `sourceScope`, or `sourceQuery` is supplied, the run recor
 
 ## Integration boundaries
 
-This workflow now mines QMD MCP and Obsidian MCP for source-linked local receipts, uses CourtListener for bounded authority lookup when candidates are available, and generates a source-linked draft research memo from those persisted manifests.
+This workflow now mines QMD MCP and Obsidian MCP for source-linked local receipts, uses CourtListener for bounded authority lookup when candidates are available, generates a source-linked draft research memo from those persisted manifests, and generates a structured evidence ledger from the persisted memo documents.
 
 CourtListener can confirm that a citation or query maps to a CourtListener record or candidate match. It does not Shepardize, determine good-law status, verify legal conclusions, check final filing citation format, decide filing readiness, generate filings, or replace attorney judgment.
 
-Stage prompts instruct agents to use integrations when available and to mark unavailable integration results as unverified. Outputs, mined receipts, authority-validation records, and generated research memos are drafts or source manifests only. They are not promoted, reliable, or ready for use until citation/source verification, opposing-counsel red-team review, lineage preservation, and qualified human verification pass.
+Stage prompts instruct agents to use integrations when available and to mark unavailable integration results as unverified. Outputs, mined receipts, authority-validation records, generated research memos, and generated evidence ledgers are drafts or source manifests only. They are not promoted, reliable, or ready for use until citation/source verification, opposing-counsel red-team review, lineage preservation, and qualified human verification pass.

@@ -15,6 +15,16 @@ import {
   type ResearchMemoDiagnostic,
 } from "../legal-research-memo.js";
 import {
+  EVIDENCE_LEDGER_DOCUMENT_KEY,
+  EVIDENCE_LEDGER_SAFETY_NOTICE,
+  deriveEvidenceLedgerStatusForRun,
+  generateCounterLawsuitEvidenceLedger,
+  type CounterLawsuitEvidenceLedgerResult,
+  type EvidenceLedgerDiagnostic,
+  type EvidenceLedgerCitationStatusKind,
+  type EvidenceLedgerConfidence,
+} from "../legal-evidence-ledger.js";
+import {
   COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY,
   COURTLISTENER_SAFETY_NOTICE,
   deriveAuthorityValidationStatusForRun,
@@ -81,6 +91,21 @@ export interface LegalWorkflowResearchMemoSummary {
   conclusionCount: number;
   sourcePathCount: number;
   diagnostics: ResearchMemoDiagnostic[];
+  safetyNotice: string;
+}
+
+export interface LegalWorkflowEvidenceLedgerSummary {
+  runId: string;
+  status: CounterLawsuitEvidenceLedgerResult["status"];
+  ledgerDocumentKey?: string;
+  statusDocumentKey?: string;
+  factCount: number;
+  sourceLinkCount: number;
+  claimLinkCount: number;
+  unresolvedGapCount: number;
+  citationStatusCounts: Record<EvidenceLedgerCitationStatusKind, number>;
+  confidenceCounts: Record<EvidenceLedgerConfidence, number>;
+  diagnostics: EvidenceLedgerDiagnostic[];
   safetyNotice: string;
 }
 
@@ -283,21 +308,89 @@ async function runResearchMemoForResponse(params: {
   }
 }
 
-function validateResearchMemoRetryPayload(body: unknown): { force?: boolean } {
+function evidenceLedgerFailureSummary(runId: string): LegalWorkflowEvidenceLedgerSummary {
+  return {
+    runId,
+    status: "failed",
+    ledgerDocumentKey: EVIDENCE_LEDGER_DOCUMENT_KEY,
+    factCount: 0,
+    sourceLinkCount: 0,
+    claimLinkCount: 0,
+    unresolvedGapCount: 0,
+    citationStatusCounts: {
+      "source-linked-local-evidence": 0,
+      "matched-courtlistener-lookup-record": 0,
+      "unresolved-authority-lookup-record": 0,
+      "missing-source-link": 0,
+      "needs-human-citation-verification": 0,
+    },
+    confidenceCounts: { high: 0, medium: 0, low: 0, unsupported: 0 },
+    diagnostics: [{
+      code: "evidence-ledger-route-failed",
+      severity: "error",
+      message: "Evidence ledger generation failed before a ledger summary could be returned. The workflow run remains queued; retry the evidence-ledger endpoint after checking prerequisite documents.",
+      sourceDocumentKey: EVIDENCE_LEDGER_DOCUMENT_KEY,
+    }],
+    safetyNotice: EVIDENCE_LEDGER_SAFETY_NOTICE,
+  };
+}
+
+async function runEvidenceLedgerForResponse(params: {
+  store: TaskStore;
+  runId: string;
+  force?: boolean;
+  deps: LegalWorkflowRouteDeps;
+}): Promise<LegalWorkflowEvidenceLedgerSummary> {
+  try {
+    const result = await generateCounterLawsuitEvidenceLedger({
+      taskStore: params.store,
+      runId: params.runId,
+      force: params.force,
+      now: params.deps.now,
+    });
+    return {
+      runId: result.runId,
+      status: result.status,
+      ledgerDocumentKey: result.ledgerDocumentKey,
+      statusDocumentKey: result.statusDocumentKey,
+      factCount: result.counts.facts,
+      sourceLinkCount: result.counts.sourceLinks,
+      claimLinkCount: result.counts.claimLinks,
+      unresolvedGapCount: result.counts.unresolvedGaps,
+      citationStatusCounts: result.counts.citationStatuses,
+      confidenceCounts: result.counts.confidence,
+      diagnostics: result.diagnostics,
+      safetyNotice: result.safetyNotice,
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.statusCode === 404) throw error;
+    return evidenceLedgerFailureSummary(params.runId);
+  }
+}
+
+function validateForceOnlyPayload(body: unknown, artifactName: string): { force?: boolean } {
   if (body === undefined || body === null || (typeof body === "object" && !Array.isArray(body) && Object.keys(body as Record<string, unknown>).length === 0)) {
     return {};
   }
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw badRequest("research memo request body must be an object");
+    throw badRequest(`${artifactName} request body must be an object`);
   }
   const record = body as Record<string, unknown>;
   for (const key of Object.keys(record)) {
-    if (key !== "force") throw badRequest(`invalid research memo field: ${key}`);
+    if (key !== "force") throw badRequest(`invalid ${artifactName} field: ${key}`);
   }
   if (record.force !== undefined && typeof record.force !== "boolean") {
     throw badRequest("force must be a boolean");
   }
   return { force: record.force as boolean | undefined };
+}
+
+function validateResearchMemoRetryPayload(body: unknown): { force?: boolean } {
+  return validateForceOnlyPayload(body, "research memo");
+}
+
+function validateEvidenceLedgerRetryPayload(body: unknown): { force?: boolean } {
+  return validateForceOnlyPayload(body, "evidence ledger");
 }
 
 export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWorkflowRouteDeps = {}): void {
@@ -329,7 +422,12 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         runId: response.runId,
         deps,
       });
-      res.status(201).json({ ...response, vaultMining, authorityValidation, researchMemo });
+      const evidenceLedger = await runEvidenceLedgerForResponse({
+        store: scopedStore,
+        runId: response.runId,
+        deps,
+      });
+      res.status(201).json({ ...response, vaultMining, authorityValidation, researchMemo, evidenceLedger });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;
@@ -410,6 +508,30 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
     }
   });
 
+  router.post("/legal-workflows/counter-lawsuit/runs/:runId/evidence-ledger", async (req, res) => {
+    try {
+      if (!req.params.runId?.trim()) throw badRequest("runId is required");
+      const { store: scopedStore } = await getProjectContext(req);
+      const request = validateEvidenceLedgerRetryPayload(req.body);
+      await getCounterLawsuitWorkflowRunStatus({
+        taskStore: scopedStore,
+        runId: req.params.runId,
+      });
+      const evidenceLedger = await runEvidenceLedgerForResponse({
+        store: scopedStore,
+        runId: req.params.runId,
+        force: request.force,
+        deps,
+      });
+      res.json(evidenceLedger);
+    } catch (error: unknown) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      rethrowAsApiError(error);
+    }
+  });
+
   router.get("/legal-workflows/counter-lawsuit/runs/:runId", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
@@ -429,7 +551,11 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         taskStore: scopedStore,
         runId: req.params.runId,
       });
-      res.json({ ...status, vaultMining, authorityValidation, researchMemo });
+      const evidenceLedger = await deriveEvidenceLedgerStatusForRun({
+        taskStore: scopedStore,
+        runId: req.params.runId,
+      });
+      res.json({ ...status, vaultMining, authorityValidation, researchMemo, evidenceLedger });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;

@@ -8462,6 +8462,43 @@ export interface CounterLawsuitResearchMemoRetryInput {
   force?: boolean;
 }
 
+export type CounterLawsuitEvidenceLedgerCitationStatusKind =
+  | "source-linked-local-evidence"
+  | "matched-courtlistener-lookup-record"
+  | "unresolved-authority-lookup-record"
+  | "missing-source-link"
+  | "needs-human-citation-verification";
+
+export type CounterLawsuitEvidenceLedgerConfidence = "high" | "medium" | "low" | "unsupported";
+
+export interface CounterLawsuitEvidenceLedgerDiagnostic {
+  code: string;
+  severity: "info" | "warning" | "error";
+  message: string;
+  sourceDocumentKey?: string;
+  sourceTaskId?: string;
+  factId?: string;
+}
+
+export interface CounterLawsuitEvidenceLedgerSummary {
+  runId: string;
+  status: "completed" | "partial" | "blocked" | "failed" | "not-run";
+  ledgerDocumentKey?: "evidence-ledger" | string;
+  statusDocumentKey?: "evidence-ledger-status" | string;
+  factCount: number;
+  sourceLinkCount: number;
+  claimLinkCount: number;
+  unresolvedGapCount: number;
+  citationStatusCounts: Record<CounterLawsuitEvidenceLedgerCitationStatusKind, number>;
+  confidenceCounts: Record<CounterLawsuitEvidenceLedgerConfidence, number>;
+  diagnostics: CounterLawsuitEvidenceLedgerDiagnostic[];
+  safetyNotice: string;
+}
+
+export interface CounterLawsuitEvidenceLedgerRetryInput {
+  force?: boolean;
+}
+
 export interface StartCounterLawsuitPrototypeWorkflowResponse {
   runId: string;
   status: CounterLawsuitWorkflowRunStatus;
@@ -8481,6 +8518,7 @@ export interface StartCounterLawsuitPrototypeWorkflowResponse {
   vaultMining?: CounterLawsuitVaultMiningSummary;
   authorityValidation?: CounterLawsuitAuthorityValidationSummary;
   researchMemo?: CounterLawsuitResearchMemoSummary;
+  evidenceLedger?: CounterLawsuitEvidenceLedgerSummary;
 }
 
 export interface CounterLawsuitWorkflowRunStatusResponse {
@@ -8495,6 +8533,7 @@ export interface CounterLawsuitWorkflowRunStatusResponse {
   vaultMining?: CounterLawsuitVaultMiningSummary;
   authorityValidation?: CounterLawsuitAuthorityValidationSummary;
   researchMemo?: CounterLawsuitResearchMemoSummary;
+  evidenceLedger?: CounterLawsuitEvidenceLedgerSummary;
 }
 
 export function startCounterLawsuitPrototypeWorkflow(
@@ -8554,6 +8593,20 @@ export function runCounterLawsuitPrototypeResearchMemo(
 ): Promise<CounterLawsuitResearchMemoSummary> {
   return api<CounterLawsuitResearchMemoSummary>(
     withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/research-memo`, projectId),
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function runCounterLawsuitPrototypeEvidenceLedger(
+  runId: string,
+  input: CounterLawsuitEvidenceLedgerRetryInput = {},
+  projectId?: string,
+): Promise<CounterLawsuitEvidenceLedgerSummary> {
+  return api<CounterLawsuitEvidenceLedgerSummary>(
+    withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/evidence-ledger`, projectId),
     {
       method: "POST",
       body: JSON.stringify(input),

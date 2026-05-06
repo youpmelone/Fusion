@@ -2,7 +2,10 @@ import { defineConfig } from "vitest/config";
 import { resolve } from "node:path";
 import { computeMaxWorkers } from "../core/src/__test-utils__/vitest-workers";
 
-const maxWorkers = computeMaxWorkers();
+// Keep droid-cli on a single fork worker. The suite is small, and running
+// multiple fork workers has produced Tinypool ERR_IPC_CHANNEL_CLOSED flakes
+// during full-workspace verification when another large package is active.
+const maxWorkers = computeMaxWorkers({ defaultCap: 1, maxCap: 1 });
 
 export default defineConfig({
   test: {

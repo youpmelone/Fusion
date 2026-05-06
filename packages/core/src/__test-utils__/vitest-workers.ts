@@ -2,6 +2,7 @@ import { cpus } from "node:os";
 
 interface ComputeMaxWorkersOptions {
   defaultCap?: number;
+  maxCap?: number;
 }
 
 function parsePositiveInt(value: string | undefined): number | undefined {
@@ -13,17 +14,19 @@ function parsePositiveInt(value: string | undefined): number | undefined {
 // Shared worker-budget computation for every package's vitest.config.
 //
 // Resolution order:
-//   1. VITEST_MAX_WORKERS — explicit per-run override, wins unconditionally.
+//   1. VITEST_MAX_WORKERS — explicit per-run override.
 //   2. FUSION_TEST_TOTAL_WORKERS — global budget across the workspace, divided
 //      by FUSION_TEST_CONCURRENCY (default 1). Lets `pnpm -r` runs cap total
 //      fan-out instead of multiplying per package.
 //   3. defaultCap — small ceiling (2 by default) so a single package run on a
 //      high-core machine stays gentle.
-// All paths clamp to (cpus - 1) so we never oversubscribe the host.
+//   4. maxCap — optional package-specific ceiling for suites that need lower fan-out.
+// All paths clamp to maxCap and (cpus - 1) so we never oversubscribe the host.
 export function computeMaxWorkers(options: ComputeMaxWorkersOptions = {}): number {
-  const { defaultCap = 2 } = options;
+  const { defaultCap = 2, maxCap } = options;
 
   const cpuCap = Math.max(1, cpus().length - 1);
+  const packageCap = maxCap === undefined ? Number.POSITIVE_INFINITY : Math.max(1, maxCap);
 
   const explicit = parsePositiveInt(process.env.VITEST_MAX_WORKERS);
   const totalBudget = parsePositiveInt(process.env.FUSION_TEST_TOTAL_WORKERS);
@@ -38,7 +41,7 @@ export function computeMaxWorkers(options: ComputeMaxWorkersOptions = {}): numbe
     workers = defaultCap;
   }
 
-  workers = Math.min(workers, cpuCap);
+  workers = Math.min(workers, cpuCap, packageCap);
   process.env.VITEST_MAX_WORKERS = String(workers);
   return workers;
 }
