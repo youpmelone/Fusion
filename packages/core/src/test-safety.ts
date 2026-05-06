@@ -18,6 +18,10 @@ function resolveGuardPath(pathValue: PathLike): string {
   }
 }
 
+function isSameOrWithin(candidate: string, protectedPath: string): boolean {
+  return candidate === protectedPath || candidate.startsWith(protectedPath + sep);
+}
+
 export function getProtectedFusionDir(): string | null {
   const root = process.env.FUSION_TEST_REAL_ROOT;
   if (!root) return null;
@@ -27,25 +31,80 @@ export function getProtectedFusionDir(): string | null {
   return join(resolvedRoot, ".fusion");
 }
 
+export function getProtectedActiveWorktreeRoot(): string | null {
+  const root = process.env.FUSION_ACTIVE_WORKTREE_ROOT;
+  if (!root) return null;
+
+  const resolvedRoot = resolveGuardPath(root);
+  if (!resolvedRoot || resolvedRoot === ":memory:") return null;
+  return resolvedRoot;
+}
+
+export function getProtectedActiveWorktreeGitEntry(): string | null {
+  const activeRoot = getProtectedActiveWorktreeRoot();
+  if (!activeRoot) return null;
+  return join(activeRoot, ".git");
+}
+
 export function isWithinProtectedFusionDir(pathValue: PathLike): boolean {
   const protectedFusionDir = getProtectedFusionDir();
   if (!protectedFusionDir) return false;
 
   const candidate = resolveGuardPath(pathValue);
   if (!candidate || candidate === ":memory:") return false;
-  return candidate === protectedFusionDir || candidate.startsWith(protectedFusionDir + sep);
+  return isSameOrWithin(candidate, protectedFusionDir);
+}
+
+export function isProtectedActiveWorktreeTarget(pathValue: PathLike): boolean {
+  const activeRoot = getProtectedActiveWorktreeRoot();
+  if (!activeRoot) return false;
+
+  const candidate = resolveGuardPath(pathValue);
+  if (!candidate || candidate === ":memory:") return false;
+  if (candidate === activeRoot) return true;
+
+  const gitEntry = getProtectedActiveWorktreeGitEntry();
+  return gitEntry ? isSameOrWithin(candidate, gitEntry) : false;
+}
+
+export function containsProtectedActiveWorktreeTarget(pathValue: PathLike): boolean {
+  const activeRoot = getProtectedActiveWorktreeRoot();
+  if (!activeRoot) return false;
+
+  const candidate = resolveGuardPath(pathValue);
+  if (!candidate || candidate === ":memory:") return false;
+  if (isSameOrWithin(activeRoot, candidate)) return true;
+
+  const gitEntry = getProtectedActiveWorktreeGitEntry();
+  return gitEntry ? isSameOrWithin(gitEntry, candidate) : false;
+}
+
+export function assertDoesNotContainProtectedActiveWorktreePath(pathValue: PathLike, context = "operation"): void {
+  const candidate = resolveGuardPath(pathValue);
+  if (!candidate || candidate === ":memory:") return;
+  if (!containsProtectedActiveWorktreeTarget(candidate)) return;
+
+  throw new Error(
+    `[test-safety] ${context} would include protected active worktree path: ${candidate}\n` +
+    "Tests must never remove, rename, or recursively copy over an ancestor of the active checkout root or its .git entry.",
+  );
 }
 
 export function assertOutsideRealFusionPath(pathValue: PathLike, context = "operation"): void {
-  const protectedFusionDir = getProtectedFusionDir();
-  if (!protectedFusionDir) return;
-
   const candidate = resolveGuardPath(pathValue);
   if (!candidate || candidate === ":memory:") return;
-  if (!isWithinProtectedFusionDir(candidate)) return;
 
-  throw new Error(
-    `[test-safety] ${context} targeted protected repo .fusion directory: ${candidate}\n` +
-    "Tests must operate inside a temp directory. Use tempWorkspace() or useIsolatedCwd().",
-  );
+  if (isWithinProtectedFusionDir(candidate)) {
+    throw new Error(
+      `[test-safety] ${context} targeted protected repo .fusion directory: ${candidate}\n` +
+      "Tests must operate inside a temp directory. Use tempWorkspace() or useIsolatedCwd().",
+    );
+  }
+
+  if (isProtectedActiveWorktreeTarget(candidate)) {
+    throw new Error(
+      `[test-safety] ${context} targeted protected active worktree path: ${candidate}\n` +
+      "Tests must never remove, overwrite, rename, or copy over the active checkout root or its .git entry.",
+    );
+  }
 }

@@ -58,7 +58,9 @@ Fusion codifies workspace verification as a deterministic contract:
 
 - Use `pnpm install --frozen-lockfile` for clean bootstrap and dependency repair paths.
 - `pnpm test:full` must be runnable in a clean worktree without requiring a prior `pnpm build`.
+- `pnpm test:full` is supported from fn-managed checkouts under `.worktrees/<slug>`, including nested task worktrees. The runner records the active checkout root in `FUSION_ACTIVE_WORKTREE_ROOT` before package tests begin so Vitest filesystem guards, worktree cleanup, and self-healing cleanup skip the checkout that is running the suite.
 - `pnpm test:full` uses the lock wrapper and a constrained-safe default worker budget (`FUSION_TEST_TOTAL_WORKERS=1`, `FUSION_TEST_CONCURRENCY=1`, and workspace concurrency `1`). It writes package output to a temporary log and fails on the first package failure rather than retrying or hiding worker deaths.
+- Worker death, exit `137`, `ERR_IPC_CHANNEL_CLOSED`, missing test binaries, and package failures are real failures. Do not add retries or package skipping to make this gate pass.
 - Root test entrypoints (`pnpm test` via `scripts/test-changed.mjs` and `pnpm test:ci:shard` via `scripts/ci-test-shard.mjs`) call `scripts/ensure-test-artifacts.mjs`, which deterministically builds only missing required workspace dist artifacts (`@fusion/core`, `@fusion/plugin-sdk`, and runtime plugins that export from `dist/*`).
 - This includes clean states where those required dist directories are absent.
 - `pnpm verify:workspace` is the canonical pre-merge gate and runs in strict order:

@@ -19,7 +19,7 @@ import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { getTaskMergeBlocker, isEphemeralAgent, type AgentStore, type TaskStore, type Settings, type Task, type MergeDetails } from "@fusion/core";
 import { createLogger } from "./logger.js";
-import { getRegisteredWorktreePaths, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
+import { getRegisteredWorktreePaths, isActiveWorktreeCleanupTarget, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
 
 const log = createLogger("self-healing");
 const execAsync = promisify(exec);
@@ -578,16 +578,20 @@ export class SelfHealingManager {
 
   private async cleanupInterruptedMergeArtifacts(task: Task): Promise<void> {
     if (task.worktree && existsSync(task.worktree)) {
-      try {
-        await execAsync(`git worktree remove ${shellQuote(task.worktree)} --force`, {
-          cwd: this.options.rootDir,
-          timeout: 120_000,
-        });
-      } catch (err: unknown) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        log.warn(
-          `Failed to remove interrupted-merge worktree ${task.worktree} for ${task.id}: ${errorMessage} — non-fatal, cleanup can retry later`,
-        );
+      if (isActiveWorktreeCleanupTarget(this.options.rootDir, task.worktree)) {
+        log.warn(`Skipping active worktree during interrupted-merge cleanup for ${task.id}: ${task.worktree}`);
+      } else {
+        try {
+          await execAsync(`git worktree remove ${shellQuote(task.worktree)} --force`, {
+            cwd: this.options.rootDir,
+            timeout: 120_000,
+          });
+        } catch (err: unknown) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          log.warn(
+            `Failed to remove interrupted-merge worktree ${task.worktree} for ${task.id}: ${errorMessage} — non-fatal, cleanup can retry later`,
+          );
+        }
       }
     }
 
@@ -1954,6 +1958,10 @@ export class SelfHealingManager {
 
       let cleaned = 0;
       for (const worktreePath of orphaned) {
+        if (isActiveWorktreeCleanupTarget(this.options.rootDir, worktreePath)) {
+          log.warn(`Skipping active worktree during orphan cleanup: ${worktreePath}`);
+          continue;
+        }
         try {
           await execAsync(`git worktree remove "${worktreePath}" --force`, {
             cwd: this.options.rootDir,
@@ -1999,7 +2007,9 @@ export class SelfHealingManager {
     if (dirs.length === 0) return 0;
 
     const registered = await getRegisteredWorktreePaths(this.options.rootDir);
-    const unregistered = dirs.filter((d) => !registered.has(resolve(d)));
+    const unregistered = dirs.filter((d) =>
+      !registered.has(resolve(d)) && !isActiveWorktreeCleanupTarget(this.options.rootDir, d),
+    );
 
     let cleaned = 0;
     for (const path of unregistered) {
@@ -2143,6 +2153,10 @@ export class SelfHealingManager {
 
       for (const { path: worktreePath } of withMtime) {
         if (removed >= excess) break;
+        if (isActiveWorktreeCleanupTarget(this.options.rootDir, worktreePath)) {
+          log.warn(`Skipping active worktree during cap enforcement: ${worktreePath}`);
+          continue;
+        }
         try {
           await execAsync(`git worktree remove "${worktreePath}" --force`, {
             cwd: this.options.rootDir,

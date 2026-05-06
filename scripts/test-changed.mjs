@@ -404,14 +404,24 @@ export function recordCachePass(packages, packageDirByName, options = {}) {
 // Execution plan
 // ---------------------------------------------------------------------------
 
-const workspaceConcurrency =
-  process.env.FUSION_TEST_WORKSPACE_CONCURRENCY || "2";
+export function resolveChangedWorkspaceConcurrency(env = process.env) {
+  return env.FUSION_TEST_WORKSPACE_CONCURRENCY || "1";
+}
 
-const fullSuiteEnv = {
-  ...process.env,
-  FUSION_TEST_TOTAL_WORKERS: process.env.FUSION_TEST_TOTAL_WORKERS || "4",
-  FUSION_TEST_CONCURRENCY: process.env.FUSION_TEST_CONCURRENCY || "2",
-};
+const workspaceConcurrency = resolveChangedWorkspaceConcurrency();
+
+export function buildChangedFullSuiteEnv(env = process.env) {
+  return {
+    ...env,
+    // Full changed-test runs are intentionally conservative by default.
+    // Running multiple workspace Vitest processes at once has produced
+    // Tinypool ERR_IPC_CHANNEL_CLOSED flakes under merge-gate resource pressure.
+    FUSION_TEST_TOTAL_WORKERS: env.FUSION_TEST_TOTAL_WORKERS || "2",
+    FUSION_TEST_CONCURRENCY: env.FUSION_TEST_CONCURRENCY || "2",
+  };
+}
+
+const fullSuiteEnv = buildChangedFullSuiteEnv();
 
 function runFullSuite(forwardedArgs) {
   run("pnpm", [`-r`, `--workspace-concurrency=${workspaceConcurrency}`, "test", ...forwardedArgs], { env: fullSuiteEnv });

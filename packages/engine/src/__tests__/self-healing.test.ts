@@ -51,6 +51,7 @@ vi.mock("node:fs", async (importOriginal) => {
 
 vi.mock("../worktree-pool.js", () => ({
   WorktreePool: vi.fn(),
+  isActiveWorktreeCleanupTarget: vi.fn().mockReturnValue(false),
   scanIdleWorktrees: vi.fn().mockResolvedValue([]),
   cleanupOrphanedWorktrees: vi.fn().mockResolvedValue(0),
   scanOrphanedBranches: vi.fn().mockResolvedValue([]),
@@ -69,11 +70,13 @@ import type { TaskStore, Settings, Task, AgentStore, Agent } from "@fusion/core"
 import { EventEmitter } from "node:events";
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { scanOrphanedBranches } from "../worktree-pool.js";
+import { isActiveWorktreeCleanupTarget, scanIdleWorktrees, scanOrphanedBranches } from "../worktree-pool.js";
 import { createLogger } from "../logger.js";
 
 const mockedExecSync = vi.mocked(execSync);
 const mockedExistsSync = vi.mocked(existsSync);
+const mockedIsActiveWorktreeCleanupTarget = vi.mocked(isActiveWorktreeCleanupTarget);
+const mockedScanIdleWorktrees = vi.mocked(scanIdleWorktrees);
 const mockedScanOrphanedBranches = vi.mocked(scanOrphanedBranches);
 const mockedCreateLogger = vi.mocked(createLogger);
 
@@ -131,6 +134,8 @@ describe("SelfHealingManager", () => {
 
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    mockedIsActiveWorktreeCleanupTarget.mockReturnValue(false);
+    mockedScanIdleWorktrees.mockResolvedValue([]);
     store = createMockStore();
     manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
   });
@@ -141,6 +146,66 @@ describe("SelfHealingManager", () => {
   });
 
   // ── Auto-unpause ─────────────────────────────────────────────────
+
+  describe("worktree cleanup safety", () => {
+    it("skips active worktrees during orphan cleanup while removing safe idle worktrees", async () => {
+      mockedScanIdleWorktrees.mockResolvedValue([
+        "/tmp/test-project/.worktrees/dusky-trout",
+        "/tmp/test-project/.worktrees/safe-idle",
+      ]);
+      mockedIsActiveWorktreeCleanupTarget.mockImplementation((_root, worktreePath) =>
+        worktreePath.endsWith("dusky-trout"),
+      );
+
+      const cleaned = await (manager as any).cleanupOrphans();
+
+      expect(cleaned).toBe(1);
+      const removeCalls = mockedExecSync.mock.calls.filter(
+        ([cmd]) => typeof cmd === "string" && cmd.includes("git worktree remove"),
+      );
+      expect(removeCalls).toHaveLength(1);
+      expect(removeCalls[0][0]).toContain("safe-idle");
+      expect(removeCalls[0][0]).not.toContain("dusky-trout");
+    });
+
+    it("skips the active worktree during interrupted merge cleanup", async () => {
+      mockedExistsSync.mockReturnValue(true);
+      mockedIsActiveWorktreeCleanupTarget.mockReturnValue(true);
+
+      await (manager as any).cleanupInterruptedMergeArtifacts({
+        id: "FN-029",
+        worktree: "/tmp/test-project/.worktrees/dusky-trout",
+        branch: "fusion/fn-029",
+      } as Task);
+
+      const worktreeRemoveCalls = mockedExecSync.mock.calls.filter(
+        ([cmd]) => typeof cmd === "string" && cmd.includes("git worktree remove"),
+      );
+      expect(worktreeRemoveCalls.map(([cmd]) => cmd)).not.toContain(
+        "git worktree remove '/tmp/test-project/.worktrees/dusky-trout' --force",
+      );
+      expect(mockedExecSync).toHaveBeenCalledWith(
+        "git branch -D 'fusion/fn-029'",
+        expect.objectContaining({ cwd: "/tmp/test-project" }),
+      );
+    });
+
+    it("still removes non-active interrupted merge worktrees", async () => {
+      mockedExistsSync.mockReturnValue(true);
+      mockedIsActiveWorktreeCleanupTarget.mockReturnValue(false);
+
+      await (manager as any).cleanupInterruptedMergeArtifacts({
+        id: "FN-030",
+        worktree: "/tmp/test-project/.worktrees/safe-idle",
+        branch: "fusion/fn-030",
+      } as Task);
+
+      expect(mockedExecSync).toHaveBeenCalledWith(
+        "git worktree remove '/tmp/test-project/.worktrees/safe-idle' --force",
+        expect.objectContaining({ cwd: "/tmp/test-project" }),
+      );
+    });
+  });
 
   describe("auto-unpause", () => {
     it("does not schedule unpause when globalPauseReason is 'manual'", async () => {

@@ -17,6 +17,8 @@ import {
   applyCacheToPlan,
   recordCachePass,
   cacheFilePath,
+  buildChangedFullSuiteEnv,
+  resolveChangedWorkspaceConcurrency,
 } from "../test-changed.mjs";
 
 import { mkdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
@@ -201,6 +203,28 @@ test("decideExecutionPlan: no affected package resolved → full", () => {
   });
   assert.equal(plan.mode, "full");
   assert.equal(plan.reason, "no-affected-package");
+});
+
+test("resolveChangedWorkspaceConcurrency: runs full changed-test packages serially by default", () => {
+  assert.equal(resolveChangedWorkspaceConcurrency({}), "1");
+  assert.equal(resolveChangedWorkspaceConcurrency({ FUSION_TEST_WORKSPACE_CONCURRENCY: "3" }), "3");
+});
+
+test("buildChangedFullSuiteEnv: caps default Vitest fan-out for full changed-test runs", () => {
+  const env = buildChangedFullSuiteEnv({});
+
+  assert.equal(env.FUSION_TEST_TOTAL_WORKERS, "2");
+  assert.equal(env.FUSION_TEST_CONCURRENCY, "2");
+});
+
+test("buildChangedFullSuiteEnv: preserves explicit worker overrides", () => {
+  const env = buildChangedFullSuiteEnv({
+    FUSION_TEST_TOTAL_WORKERS: "8",
+    FUSION_TEST_CONCURRENCY: "4",
+  });
+
+  assert.equal(env.FUSION_TEST_TOTAL_WORKERS, "8");
+  assert.equal(env.FUSION_TEST_CONCURRENCY, "4");
 });
 
 // ---------------------------------------------------------------------------

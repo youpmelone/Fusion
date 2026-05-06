@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { isMainThread } from "node:worker_threads";
-import { assertOutsideRealFusionPath } from "../test-safety.js";
+import { assertDoesNotContainProtectedActiveWorktreePath, assertOutsideRealFusionPath } from "../test-safety.js";
 
 type FsModule = typeof import("node:fs");
 type FsPromisesModule = typeof import("node:fs/promises");
@@ -97,6 +97,7 @@ function findRepoRoot(start: string): string {
 
 const repoRoot = findRepoRoot(realProjectRoot);
 process.env.FUSION_TEST_REAL_ROOT = repoRoot;
+process.env.FUSION_ACTIVE_WORKTREE_ROOT = process.env.FUSION_ACTIVE_WORKTREE_ROOT || repoRoot;
 
 // Shared parent directory for all worker temp dirs in this run.
 // globalTeardown wipes this at the end of the suite.
@@ -192,9 +193,25 @@ function installFsGuards(): void {
     if (pathValue === undefined || pathValue === null) return;
     assertOutsideRealFusionPath(pathValue as Parameters<typeof assertOutsideRealFusionPath>[0], context);
   };
+  const guardDestructive = (pathValue: unknown, context: string) => {
+    guardOne(pathValue, context);
+    if (pathValue === undefined || pathValue === null) return;
+    assertDoesNotContainProtectedActiveWorktreePath(
+      pathValue as Parameters<typeof assertDoesNotContainProtectedActiveWorktreePath>[0],
+      context,
+    );
+  };
   const guardBoth = (source: unknown, target: unknown, context: string) => {
     guardOne(source, `${context} source`);
     guardOne(target, `${context} target`);
+  };
+  const guardDestructiveBoth = (source: unknown, target: unknown, context: string) => {
+    guardDestructive(source, `${context} source`);
+    guardDestructive(target, `${context} target`);
+  };
+  const guardCopy = (source: unknown, target: unknown, context: string) => {
+    guardOne(source, `${context} source`);
+    guardDestructive(target, `${context} target`);
   };
 
   mutableFs.mkdirSync = ((path, options) => {
@@ -210,7 +227,7 @@ function installFsGuards(): void {
     return originalFs.appendFileSync(path, data, options as Parameters<typeof fs.appendFileSync>[2]);
   }) as typeof fs.appendFileSync;
   mutableFs.rmSync = ((path, options) => {
-    guardOne(path, "fs.rmSync");
+    guardDestructive(path, "fs.rmSync");
     return originalFs.rmSync(path, options as Parameters<typeof fs.rmSync>[1]);
   }) as typeof fs.rmSync;
   mutableFs.unlinkSync = ((path) => {
@@ -218,19 +235,19 @@ function installFsGuards(): void {
     return originalFs.unlinkSync(path);
   }) as typeof fs.unlinkSync;
   mutableFs.rmdirSync = ((path, options) => {
-    guardOne(path, "fs.rmdirSync");
+    guardDestructive(path, "fs.rmdirSync");
     return originalFs.rmdirSync(path, options as Parameters<typeof fs.rmdirSync>[1]);
   }) as typeof fs.rmdirSync;
   mutableFs.renameSync = ((oldPath, newPath) => {
-    guardBoth(oldPath, newPath, "fs.renameSync");
+    guardDestructiveBoth(oldPath, newPath, "fs.renameSync");
     return originalFs.renameSync(oldPath, newPath);
   }) as typeof fs.renameSync;
   mutableFs.copyFileSync = ((src, dest, mode) => {
-    guardBoth(src, dest, "fs.copyFileSync");
+    guardCopy(src, dest, "fs.copyFileSync");
     return originalFs.copyFileSync(src, dest, mode as Parameters<typeof fs.copyFileSync>[2]);
   }) as typeof fs.copyFileSync;
   mutableFs.cpSync = ((src, dest, options) => {
-    guardBoth(src, dest, "fs.cpSync");
+    guardCopy(src, dest, "fs.cpSync");
     return originalFs.cpSync(src, dest, options as Parameters<typeof fs.cpSync>[2]);
   }) as typeof fs.cpSync;
   mutableFs.mkdtempSync = ((prefix, options) => {
@@ -271,7 +288,7 @@ function installFsGuards(): void {
     return originalFs.appendFile(...args);
   }) as typeof fs.appendFile;
   mutableFs.rm = ((...args: Parameters<typeof fs.rm>) => {
-    guardOne(args[0], "fs.rm");
+    guardDestructive(args[0], "fs.rm");
     return originalFs.rm(...args);
   }) as typeof fs.rm;
   mutableFs.unlink = ((...args: Parameters<typeof fs.unlink>) => {
@@ -279,19 +296,19 @@ function installFsGuards(): void {
     return originalFs.unlink(...args);
   }) as typeof fs.unlink;
   mutableFs.rmdir = ((...args: Parameters<typeof fs.rmdir>) => {
-    guardOne(args[0], "fs.rmdir");
+    guardDestructive(args[0], "fs.rmdir");
     return originalFs.rmdir(...args);
   }) as typeof fs.rmdir;
   mutableFs.rename = ((...args: Parameters<typeof fs.rename>) => {
-    guardBoth(args[0], args[1], "fs.rename");
+    guardDestructiveBoth(args[0], args[1], "fs.rename");
     return originalFs.rename(...args);
   }) as typeof fs.rename;
   mutableFs.copyFile = ((...args: Parameters<typeof fs.copyFile>) => {
-    guardBoth(args[0], args[1], "fs.copyFile");
+    guardCopy(args[0], args[1], "fs.copyFile");
     return originalFs.copyFile(...args);
   }) as typeof fs.copyFile;
   mutableFs.cp = ((...args: Parameters<typeof fs.cp>) => {
-    guardBoth(args[0], args[1], "fs.cp");
+    guardCopy(args[0], args[1], "fs.cp");
     return originalFs.cp(...args);
   }) as typeof fs.cp;
   mutableFs.open = ((...args: Parameters<typeof fs.open>) => {
@@ -324,7 +341,7 @@ function installFsGuards(): void {
     return originalFsPromises.appendFile(...args);
   }) as typeof fsPromises.appendFile;
   mutableFsPromises.rm = (async (...args: Parameters<typeof fsPromises.rm>) => {
-    guardOne(args[0], "fs.promises.rm");
+    guardDestructive(args[0], "fs.promises.rm");
     return originalFsPromises.rm(...args);
   }) as typeof fsPromises.rm;
   mutableFsPromises.unlink = (async (...args: Parameters<typeof fsPromises.unlink>) => {
@@ -332,19 +349,19 @@ function installFsGuards(): void {
     return originalFsPromises.unlink(...args);
   }) as typeof fsPromises.unlink;
   mutableFsPromises.rmdir = (async (...args: Parameters<typeof fsPromises.rmdir>) => {
-    guardOne(args[0], "fs.promises.rmdir");
+    guardDestructive(args[0], "fs.promises.rmdir");
     return originalFsPromises.rmdir(...args);
   }) as typeof fsPromises.rmdir;
   mutableFsPromises.rename = (async (...args: Parameters<typeof fsPromises.rename>) => {
-    guardBoth(args[0], args[1], "fs.promises.rename");
+    guardDestructiveBoth(args[0], args[1], "fs.promises.rename");
     return originalFsPromises.rename(...args);
   }) as typeof fsPromises.rename;
   mutableFsPromises.copyFile = (async (...args: Parameters<typeof fsPromises.copyFile>) => {
-    guardBoth(args[0], args[1], "fs.promises.copyFile");
+    guardCopy(args[0], args[1], "fs.promises.copyFile");
     return originalFsPromises.copyFile(...args);
   }) as typeof fsPromises.copyFile;
   mutableFsPromises.cp = (async (...args: Parameters<typeof fsPromises.cp>) => {
-    guardBoth(args[0], args[1], "fs.promises.cp");
+    guardCopy(args[0], args[1], "fs.promises.cp");
     return originalFsPromises.cp(...args);
   }) as typeof fsPromises.cp;
   mutableFsPromises.open = (async (...args: Parameters<typeof fsPromises.open>) => {
@@ -467,6 +484,44 @@ function cleanupTrackedSubprocess(proc: ChildProcess): void {
   trackedSubprocesses.delete(proc);
 }
 
+type ListenerCapableProcess = ChildProcess & {
+  once?: (event: string, listener: (...args: unknown[]) => void) => unknown;
+  removeListener?: (event: string, listener: (...args: unknown[]) => void) => unknown;
+};
+
+function subprocessEmitterShapeError(commandLine: string): string {
+  return `Subprocess tracker expected an EventEmitter-compatible ChildProcess for ${commandLine}, but the returned object has no once() method. ` +
+    "Fix the child_process mock to return a real EventEmitter or a ChildProcess-shaped test double.";
+}
+
+export function __testOnlyAssertListenerCapableProcess(
+  proc: unknown,
+  commandLine: string,
+  failureSink: string[] = [],
+): proc is ListenerCapableProcess {
+  const candidate = proc as ListenerCapableProcess;
+  if (typeof candidate.once === "function") {
+    return true;
+  }
+
+  failureSink.push(subprocessEmitterShapeError(commandLine));
+  return false;
+}
+
+function assertListenerCapableProcess(proc: ChildProcess, commandLine: string): proc is ListenerCapableProcess {
+  return __testOnlyAssertListenerCapableProcess(proc, commandLine, completedSubprocessFailures);
+}
+
+export function __testOnlyRemoveProcessListener(proc: unknown, event: string, listener: (...args: unknown[]) => void): void {
+  const removeListener = (proc as ListenerCapableProcess).removeListener;
+  if (typeof removeListener !== "function") return;
+  removeListener.call(proc, event, listener);
+}
+
+function removeProcessListener(proc: ChildProcess, event: string, listener: (...args: unknown[]) => void): void {
+  __testOnlyRemoveProcessListener(proc, event, listener);
+}
+
 function registerTrackedSubprocess(proc: ChildProcess, commandLine: string): void {
   const tracked: TrackedSubprocess = {
     commandLine,
@@ -488,6 +543,10 @@ function registerTrackedSubprocess(proc: ChildProcess, commandLine: string): voi
       // Ignore — the process may have already exited.
     }
   }, DEFAULT_TEST_SUBPROCESS_TIMEOUT_MS);
+
+  if (!assertListenerCapableProcess(proc, commandLine)) {
+    return;
+  }
 
   const finish = () => cleanupTrackedSubprocess(proc);
   proc.once("close", finish);
@@ -644,10 +703,14 @@ afterEach(async () => {
             continue;
           }
           const finish = () => {
-            proc.removeListener("exit", finish);
-            proc.removeListener("close", finish);
+            removeProcessListener(proc, "exit", finish);
+            removeProcessListener(proc, "close", finish);
             done();
           };
+          if (!assertListenerCapableProcess(proc, trackedSubprocesses.get(proc)?.commandLine ?? "unknown subprocess")) {
+            done();
+            continue;
+          }
           proc.once("exit", finish);
           proc.once("close", finish);
         }
