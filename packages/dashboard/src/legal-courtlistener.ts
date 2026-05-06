@@ -119,11 +119,14 @@ const MAX_INPUT_CHARS = 300;
 const MAX_TEXT_SCAN_CHARS = 8_000;
 const MAX_SUMMARY_CHARS = 700;
 const TOKEN_RE = /["']?(?:authorization)["']?\s*[:=]\s*["']?bearer\s+[^"'\s,}]{8,}["']?|["']?(?:token|secret|api[_-]?key|password|credential|auth)["']?\s*[:=]\s*["']?[^"'\s,}]{8,}["']?|bearer\s+\S{8,}|Token\s+\S{8,}|(?:sk|pk|ghp|github_pat)[A-Za-z0-9_:\-.=+/]{8,}/gi;
+const SECRET_FLAG_VALUE_RE = /(--[A-Za-z0-9_.-]*(?:token|secret|key|password|credential|auth)[A-Za-z0-9_.-]*)(\s+)(?:"[^"]+"|'[^']+'|\S+)/gi;
 const TOKEN_KEY_RE = /(?:token|secret|api[_-]?key|password|credential|auth|authorization)/i;
 const CITATION_RE = /\b\d{1,4}\s+(?:U\.S\.|S\.Ct\.|F\.?\s?\d?d|F\.\s?Supp\.?\s?\d?d|Cal\.?\s?\d?d|N\.Y\.?\s?\d?d|P\.?\s?\d?d|A\.?\s?\d?d|So\.?\s?\d?d)\s+\d{1,5}\b/g;
 
 function redactSecrets(value: string): string {
-  return value.replace(TOKEN_RE, "[REDACTED]");
+  return value
+    .replace(SECRET_FLAG_VALUE_RE, "$1$2[REDACTED]")
+    .replace(TOKEN_RE, "[REDACTED]");
 }
 
 function boundedText(value: unknown, maxChars = MAX_INPUT_CHARS): string | undefined {
@@ -262,9 +265,49 @@ function summarizeRaw(raw: unknown): string {
   return redactSecrets(`object(keys=${keys.join(",")}${count !== undefined ? `, results=${count}` : ""})`).slice(0, MAX_SUMMARY_CHARS);
 }
 
+function hasAuthorityFields(record: Record<string, unknown>): boolean {
+  return [
+    "citation",
+    "normalized_citation",
+    "canonical_citation",
+    "case_name",
+    "caseName",
+    "absolute_url",
+    "cluster_id",
+    "opinion_id",
+    "court",
+  ].some((key) => record[key] !== undefined);
+}
+
+function extractAuthorityMatches(raw: unknown): unknown[] {
+  const wrappers = extractResults(raw);
+  const matches: unknown[] = [];
+  for (const wrapper of wrappers) {
+    const record = asRecord(wrapper);
+    if (!record) {
+      if (wrapper !== undefined && wrapper !== null) matches.push(wrapper);
+      continue;
+    }
+
+    let foundNested = false;
+    for (const key of ["clusters", "opinions", "matches", "authorities"] as const) {
+      if (Array.isArray(record[key])) {
+        foundNested = true;
+        matches.push(...record[key] as unknown[]);
+      }
+    }
+    if (foundNested) continue;
+
+    if (asRecord(record.cluster) || asRecord(record.opinion) || hasAuthorityFields(record)) {
+      matches.push(record);
+    }
+  }
+  return matches;
+}
+
 function candidateRecord(rawMatch: unknown): Record<string, unknown> {
   const record = asRecord(rawMatch) ?? { text: typeof rawMatch === "string" ? rawMatch : JSON.stringify(rawMatch) };
-  const cluster = nested(record, ["cluster", "case", "absolute_url"]);
+  const cluster = nested(record, ["cluster", "case"]);
   const opinion = nested(record, ["opinion"]);
   return { ...(cluster ?? {}), ...(opinion ?? {}), ...record };
 }
@@ -285,7 +328,7 @@ export function normalizeCourtListenerAuthorityRecord(params: {
   retrievedAt?: string;
 }): CourtListenerAuthorityValidationRecord {
   const retrievedAt = params.retrievedAt ?? new Date().toISOString();
-  const first = extractResults(params.rawResult)[0];
+  const first = extractAuthorityMatches(params.rawResult)[0];
   const record = candidateRecord(first);
   const cluster = nested(record, ["cluster"]);
   const opinion = nested(record, ["opinion"]);
@@ -396,7 +439,7 @@ export function extractCourtListenerAuthorityCandidates(request: CourtListenerAu
 }
 
 function statusFromRaw(raw: unknown): CourtListenerAuthorityStatus {
-  const count = extractResults(raw).length;
+  const count = extractAuthorityMatches(raw).length;
   if (count === 0) return "not-found";
   return count > 1 ? "ambiguous" : "matched";
 }
@@ -451,11 +494,11 @@ export async function validateAuthorityCandidatesWithCourtListener(params: {
       }));
       diagnostics.push({
         providerName: "courtlistener",
-        status: status === "matched" || status === "ambiguous" ? "available" : "partial",
+        status: status === "matched" ? "available" : "partial",
         message: `CourtListener ${candidate.inputType} lookup returned ${status} for a bounded candidate.`,
         endpoint: candidate.inputType === "citation" ? "citation-lookup" : "search",
         candidate: candidate.input,
-        acceptedCount: status === "matched" || status === "ambiguous" ? 1 : 0,
+        acceptedCount: status === "matched" ? 1 : 0,
       });
     } catch (error) {
       validationRecords.push(normalizeCourtListenerAuthorityRecord({
@@ -476,8 +519,8 @@ export async function validateAuthorityCandidatesWithCourtListener(params: {
     }
   }
 
-  const validatedCount = validationRecords.filter((record) => record.status === "matched" || record.status === "ambiguous").length;
-  const unmatchedCount = validationRecords.filter((record) => record.status === "not-found" || record.status === "unavailable").length;
+  const validatedCount = validationRecords.filter((record) => record.status === "matched").length;
+  const unmatchedCount = validationRecords.filter((record) => record.status === "not-found" || record.status === "unavailable" || record.status === "ambiguous").length;
   const status: CourtListenerValidationStatus = validatedCount > 0 && unmatchedCount === 0 ? "completed"
     : validatedCount > 0 ? "partial"
       : validationRecords.every((record) => record.status === "unavailable") ? "unavailable"

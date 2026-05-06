@@ -103,6 +103,31 @@ describe("CourtListener authority normalization", () => {
     expect(record.rawResultSummary).not.toContain("super-secret-token");
   });
 
+  it("redacts standalone token-like CLI flags in raw summaries", () => {
+    const record = normalizeCourtListenerAuthorityRecord({
+      input: "1 U.S. 1",
+      inputType: "citation",
+      status: "unavailable",
+      rawResult: { error: "courtlistener --auth-token super-secret-value failed" },
+    });
+    expect(record.rawResultSummary).not.toContain("super-secret-value");
+  });
+
+  it("treats empty citation lookup wrappers as not found and multi-cluster wrappers as ambiguous", async () => {
+    const emptyWrapper = await validateAuthorityCandidatesWithCourtListener({
+      client: new FakeCourtListenerClient([{ citation: "1 U.S. 1", clusters: [] }]),
+      request: { citations: ["1 U.S. 1"] },
+    });
+    expect(emptyWrapper.validationRecords[0].status).toBe("not-found");
+
+    const multiCluster = await validateAuthorityCandidatesWithCourtListener({
+      client: new FakeCourtListenerClient([{ citation: "1 U.S. 1", clusters: [{ case_name: "Left" }, { case_name: "Right" }] }]),
+      request: { citations: ["1 U.S. 1"] },
+    });
+    expect(multiCluster.validationRecords[0].status).toBe("ambiguous");
+    expect(multiCluster.validatedCount).toBe(0);
+  });
+
   it("keeps deterministic hashes for equivalent authority records", () => {
     const rawResult = { results: [{ citation: "123 F.3d 456", case_name: "Acme v. Example" }] };
     const left = normalizeCourtListenerAuthorityRecord({ input: "123 F.3d 456", inputType: "citation", status: "matched", retrievedAt: "a", rawResult });
@@ -166,7 +191,9 @@ describe("CourtListener authority validation service", () => {
 
     const ambiguous = await validateAuthorityCandidatesWithCourtListener({ client: new FakeCourtListenerClient({ results: [{ citation: "1 U.S. 1" }, { citation: "1 U.S. 1" }] }), request: { citations: ["1 U.S. 1"] } });
     expect(ambiguous.validationRecords[0].status).toBe("ambiguous");
-    expect(ambiguous.validatedCount).toBe(1);
+    expect(ambiguous.validatedCount).toBe(0);
+    expect(ambiguous.unmatchedCount).toBe(1);
+    expect(ambiguous.status).toBe("partial");
 
     const unavailable = await validateAuthorityCandidatesWithCourtListener({ client: new FakeCourtListenerClient({}, true), request: { citations: ["1 U.S. 1"] } });
     expect(unavailable.status).toBe("unavailable");
