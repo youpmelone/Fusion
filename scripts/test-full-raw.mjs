@@ -61,6 +61,8 @@ for (const workspace of workspaces) {
       ...process.env,
       FUSION_TEST_TOTAL_WORKERS: process.env.FUSION_TEST_TOTAL_WORKERS ?? "1",
       FUSION_TEST_CONCURRENCY: process.env.FUSION_TEST_CONCURRENCY ?? "1",
+      VITEST_MAX_WORKERS: process.env.VITEST_MAX_WORKERS ?? "1",
+      VITEST_MIN_WORKERS: process.env.VITEST_MIN_WORKERS ?? "1",
     },
   });
 }
