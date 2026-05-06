@@ -8593,6 +8593,34 @@ export interface CounterLawsuitRedTeamReportRetryInput {
   force?: boolean;
 }
 
+export interface CounterLawsuitLineageScoringLogDiagnostic {
+  code: string;
+  severity: "info" | "warning" | "error";
+  message: string;
+  sourceDocumentKey?: string;
+  sourceTaskId?: string;
+}
+
+export interface CounterLawsuitLineageScoringLogSummary {
+  runId: string;
+  status: "completed" | "partial" | "blocked" | "failed" | "stale" | "not-run";
+  lineageScoringLogDocumentKey?: "lineage-scoring-log" | string;
+  statusDocumentKey?: "lineage-scoring-log-status" | string;
+  promptTraceCount: number;
+  searchTraceCount: number;
+  draftVersionCount: number;
+  critiqueScoreCount: number;
+  rejectedVariantCount: number;
+  promotionDecision: "not-promoted";
+  unresolvedBlockerCount: number;
+  diagnostics: CounterLawsuitLineageScoringLogDiagnostic[];
+  safetyNotice: string;
+}
+
+export interface CounterLawsuitLineageScoringLogRetryInput {
+  force?: boolean;
+}
+
 export interface StartCounterLawsuitPrototypeWorkflowResponse {
   runId: string;
   status: CounterLawsuitWorkflowRunStatus;
@@ -8616,6 +8644,7 @@ export interface StartCounterLawsuitPrototypeWorkflowResponse {
   claimMap?: CounterLawsuitClaimMapSummary;
   draftComplaint?: CounterLawsuitComplaintDraftSummary;
   redTeamReport?: CounterLawsuitRedTeamReportSummary;
+  lineageScoringLog?: CounterLawsuitLineageScoringLogSummary;
 }
 
 export interface CounterLawsuitWorkflowRunStatusResponse {
@@ -8634,6 +8663,7 @@ export interface CounterLawsuitWorkflowRunStatusResponse {
   claimMap?: CounterLawsuitClaimMapSummary;
   draftComplaint?: CounterLawsuitComplaintDraftSummary;
   redTeamReport?: CounterLawsuitRedTeamReportSummary;
+  lineageScoringLog?: CounterLawsuitLineageScoringLogSummary;
 }
 
 export function startCounterLawsuitPrototypeWorkflow(
@@ -8749,6 +8779,20 @@ export function runCounterLawsuitPrototypeRedTeamReport(
 ): Promise<CounterLawsuitRedTeamReportSummary> {
   return api<CounterLawsuitRedTeamReportSummary>(
     withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/red-team-report`, projectId),
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function runCounterLawsuitPrototypeLineageScoringLog(
+  runId: string,
+  input: CounterLawsuitLineageScoringLogRetryInput = {},
+  projectId?: string,
+): Promise<CounterLawsuitLineageScoringLogSummary> {
+  return api<CounterLawsuitLineageScoringLogSummary>(
+    withProjectId(`/legal-workflows/counter-lawsuit/runs/${encodeURIComponent(runId)}/lineage-scoring-log`, projectId),
     {
       method: "POST",
       body: JSON.stringify(input),
