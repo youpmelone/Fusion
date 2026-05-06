@@ -473,23 +473,37 @@ type ListenerCapableProcess = ChildProcess & {
   removeListener?: (event: string, listener: (...args: unknown[]) => void) => unknown;
 };
 
-function assertListenerCapableProcess(proc: ChildProcess, commandLine: string): proc is ListenerCapableProcess {
+function subprocessEmitterShapeError(commandLine: string): string {
+  return `Subprocess tracker expected an EventEmitter-compatible ChildProcess for ${commandLine}, but the returned object has no once() method. ` +
+    "Fix the child_process mock to return a real EventEmitter or a ChildProcess-shaped test double.";
+}
+
+export function __testOnlyAssertListenerCapableProcess(
+  proc: unknown,
+  commandLine: string,
+  failureSink: string[] = [],
+): proc is ListenerCapableProcess {
   const candidate = proc as ListenerCapableProcess;
   if (typeof candidate.once === "function") {
     return true;
   }
 
-  completedSubprocessFailures.push(
-    `Subprocess tracker expected an EventEmitter-compatible ChildProcess for ${commandLine}, but the returned object has no once() method. ` +
-    "Fix the child_process mock to return a real EventEmitter or a ChildProcess-shaped test double.",
-  );
+  failureSink.push(subprocessEmitterShapeError(commandLine));
   return false;
 }
 
-function removeProcessListener(proc: ChildProcess, event: string, listener: (...args: unknown[]) => void): void {
+function assertListenerCapableProcess(proc: ChildProcess, commandLine: string): proc is ListenerCapableProcess {
+  return __testOnlyAssertListenerCapableProcess(proc, commandLine, completedSubprocessFailures);
+}
+
+export function __testOnlyRemoveProcessListener(proc: unknown, event: string, listener: (...args: unknown[]) => void): void {
   const removeListener = (proc as ListenerCapableProcess).removeListener;
   if (typeof removeListener !== "function") return;
   removeListener.call(proc, event, listener);
+}
+
+function removeProcessListener(proc: ChildProcess, event: string, listener: (...args: unknown[]) => void): void {
+  __testOnlyRemoveProcessListener(proc, event, listener);
 }
 
 function registerTrackedSubprocess(proc: ChildProcess, commandLine: string): void {
