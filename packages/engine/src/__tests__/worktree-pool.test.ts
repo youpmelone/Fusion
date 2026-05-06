@@ -52,6 +52,7 @@ import {
   scanIdleWorktrees,
   cleanupOrphanedWorktrees,
   reapOrphanWorktrees,
+  isUsableTaskWorktree,
   scanOrphanedBranches,
 } from "../worktree-pool.js";
 import { execSync } from "node:child_process";
@@ -552,6 +553,54 @@ function mockRegisteredWorktrees(rootDir: string, names: string[]) {
   });
 }
 
+
+// ── isUsableTaskWorktree lifecycle-invariant tests ─────────────────────
+
+describe("isUsableTaskWorktree", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedExistsSync.mockReturnValue(true);
+    mockedLstatSync.mockReturnValue({ isDirectory: () => true, isSymbolicLink: () => false } as any);
+  });
+
+  it.each([
+    {
+      name: "missing assigned path",
+      path: "/root/.worktrees/missing-wt",
+      registered: ["missing-wt"],
+      exists: (p: unknown) => String(p) !== "/root/.worktrees/missing-wt",
+    },
+    {
+      name: "unregistered directory",
+      path: "/root/.worktrees/unregistered-wt",
+      registered: [],
+    },
+    {
+      name: "file placeholder",
+      path: "/root/.worktrees/file-wt",
+      registered: ["file-wt"],
+      lstat: { isDirectory: () => false, isSymbolicLink: () => false },
+    },
+    {
+      name: "symlink placeholder",
+      path: "/root/.worktrees/symlink-wt",
+      registered: ["symlink-wt"],
+      lstat: { isDirectory: () => true, isSymbolicLink: () => true },
+    },
+    {
+      name: "nested worktree path",
+      path: "/root/.worktrees/outer/.worktrees/inner",
+      registered: ["outer", "outer/.worktrees/inner"],
+    },
+  ])("rejects $name as a resumable task worktree", async ({ path, registered, exists, lstat }) => {
+    mockRegisteredWorktrees("/root", registered);
+    mockedExistsSync.mockImplementation(exists ?? (() => true));
+    mockedLstatSync.mockReturnValue((lstat ?? { isDirectory: () => true, isSymbolicLink: () => false }) as any);
+
+    await expect(isUsableTaskWorktree("/root", path)).resolves.toBe(false);
+  });
+});
+
 // ── scanIdleWorktrees tests ───────────────────────────────────────────
 
 describe("scanIdleWorktrees", () => {
@@ -795,7 +844,7 @@ describe("cleanupOrphanedWorktrees", () => {
     expect(removeCalls).toHaveLength(0);
   });
 
-  it("removes unregistered directories even when stale active task metadata references them", async () => {
+  it("preserves unregistered directories still attached to active tasks", async () => {
     mockedReaddirSync.mockReturnValue([
       makeDirEntry("broken-wt"),
     ] as any);
@@ -807,11 +856,24 @@ describe("cleanupOrphanedWorktrees", () => {
 
     const cleaned = await cleanupOrphanedWorktrees("/root", store);
 
-    expect(cleaned).toBe(1);
-    expect(mockedRmSync).toHaveBeenCalledWith("/root/.worktrees/broken-wt", {
-      recursive: true,
-      force: true,
-    });
+    expect(cleaned).toBe(0);
+    expect(mockedRmSync).not.toHaveBeenCalledWith("/root/.worktrees/broken-wt", expect.anything());
+  });
+
+  it("preserves malformed nested paths still attached to active tasks", async () => {
+    mockedReaddirSync.mockReturnValue([
+      makeDirEntry("outer"),
+    ] as any);
+    mockRegisteredWorktrees("/root", []);
+
+    const store = createMockStore([
+      makeTask("FN-002", "in-progress", "/root/.worktrees/outer/.worktrees/inner"),
+    ]);
+
+    const cleaned = await cleanupOrphanedWorktrees("/root", store);
+
+    expect(cleaned).toBe(0);
+    expect(mockedRmSync).not.toHaveBeenCalledWith("/root/.worktrees/outer", expect.anything());
   });
 });
 
