@@ -273,6 +273,21 @@ describe("research memo generation", () => {
     expect(serialized).toContain("[REDACTED]");
   });
 
+  it("preserves persisted failed status when the memo document is missing", async () => {
+    const store = new FakeTaskStore();
+    seedPrerequisites(store);
+    store.setDocument(RESEARCH_MEMO_STATUS_DOCUMENT_KEY, "# failed", {
+      status: "failed",
+      evidenceCount: 2,
+      authorityCount: 1,
+      conclusionCount: 0,
+      sourcePathCount: 2,
+      diagnostics: [{ code: "failed", severity: "error", message: "failed safely" }],
+    });
+    const summary = await deriveResearchMemoStatusForRun({ taskStore: store as never, runId: "CLW-1" });
+    expect(summary).toMatchObject({ status: "failed", memoDocumentKey: undefined, statusDocumentKey: RESEARCH_MEMO_STATUS_DOCUMENT_KEY, evidenceCount: 2 });
+  });
+
   it("derives status summaries from persisted memo documents", async () => {
     const store = new FakeTaskStore();
     seedPrerequisites(store);

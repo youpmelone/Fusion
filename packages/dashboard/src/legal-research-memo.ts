@@ -675,8 +675,33 @@ export async function deriveResearchMemoStatusForRun(params: {
   const doc = await params.taskStore.getTaskDocument(researchMemoTask.id, RESEARCH_MEMO_DOCUMENT_KEY).catch(() => null);
   const statusDoc = await params.taskStore.getTaskDocument(researchMemoTask.id, RESEARCH_MEMO_STATUS_DOCUMENT_KEY).catch(() => null);
   if (!doc) {
-    const collected = await collectCounterLawsuitResearchMemoInputs(params);
-    return { ...researchMemoSummaryFromResult(collected), memoDocumentKey: undefined, statusDocumentKey: statusDoc ? RESEARCH_MEMO_STATUS_DOCUMENT_KEY : collected.statusDocumentKey };
+    if (statusDoc) {
+      const statusManifest = parseManifestFromDocument(statusDoc, RESEARCH_MEMO_STATUS_DOCUMENT_KEY).manifest ?? {};
+      const statusDiagnostics = manifestArray(statusManifest, ["diagnostics"]) as unknown as ResearchMemoDiagnostic[];
+      return {
+        runId: params.runId,
+        status: typeof statusManifest.status === "string" ? statusManifest.status as ResearchMemoStatus : "failed",
+        memoDocumentKey: undefined,
+        statusDocumentKey: RESEARCH_MEMO_STATUS_DOCUMENT_KEY,
+        evidenceCount: typeof statusManifest.evidenceCount === "number" ? statusManifest.evidenceCount : 0,
+        authorityCount: typeof statusManifest.authorityCount === "number" ? statusManifest.authorityCount : 0,
+        conclusionCount: typeof statusManifest.conclusionCount === "number" ? statusManifest.conclusionCount : 0,
+        sourcePathCount: typeof statusManifest.sourcePathCount === "number" ? statusManifest.sourcePathCount : 0,
+        diagnostics: Array.isArray(statusDiagnostics) ? statusDiagnostics : [],
+        safetyNotice: RESEARCH_MEMO_SAFETY_NOTICE,
+      };
+    }
+    return {
+      runId: params.runId,
+      status: "not-run",
+      memoDocumentKey: undefined,
+      evidenceCount: 0,
+      authorityCount: 0,
+      conclusionCount: 0,
+      sourcePathCount: 0,
+      diagnostics: [],
+      safetyNotice: RESEARCH_MEMO_SAFETY_NOTICE,
+    };
   }
   const manifest = parseManifestFromDocument(doc, RESEARCH_MEMO_DOCUMENT_KEY).manifest ?? {};
   const evidence = manifestArray(manifest, ["evidence"]);

@@ -256,12 +256,14 @@ async function runResearchMemoForResponse(params: {
   store: TaskStore;
   runId: string;
   force?: boolean;
+  deps: LegalWorkflowRouteDeps;
 }): Promise<LegalWorkflowResearchMemoSummary> {
   try {
     const result = await generateCounterLawsuitResearchMemo({
       taskStore: params.store,
       runId: params.runId,
       force: params.force,
+      now: params.deps.now,
     });
     return {
       runId: result.runId,
@@ -325,6 +327,7 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
       const researchMemo = await runResearchMemoForResponse({
         store: scopedStore,
         runId: response.runId,
+        deps,
       });
       res.status(201).json({ ...response, vaultMining, authorityValidation, researchMemo });
     } catch (error: unknown) {
@@ -396,6 +399,7 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         store: scopedStore,
         runId: req.params.runId,
         force: request.force,
+        deps,
       });
       res.json(researchMemo);
     } catch (error: unknown) {
