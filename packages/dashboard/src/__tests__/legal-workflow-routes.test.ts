@@ -281,12 +281,21 @@ describe("legal workflow routes", () => {
     expect(body.workflowStepIds).toHaveLength(3);
     expect(body.agentIds).toHaveLength(6);
     expect(body.artifactKeys).toEqual(["research-memo", "evidence-ledger", "claim-map", "draft-counter-lawsuit-complaint", "red-team-report", "lineage-scoring-log"]);
+    expect(body.artifacts.map((artifact: any) => artifact.label)).toEqual(["Research memo", "Evidence ledger", "Claim map", "Draft complaint", "Opposing-counsel red-team report", "Lineage/scoring log"]);
     expect(body.safetyGates).toEqual(["citation-source-verification", "opposing-counsel-red-team", "lineage-preservation"]);
     expect(body.sourceScopeStatus).toBe("specified");
     expect(body.codexSkillSource).toBe("user");
 
     expect(defaultStore.tasks).toHaveLength(6);
     expect(defaultStore.tasks.every((task) => task.column === "todo")).toBe(true);
+    expect(defaultStore.tasks[4].description).toContain("task document key `draft-counter-lawsuit-complaint`");
+    expect(defaultStore.tasks[4].description).toContain("task document key `draft-counter-lawsuit-complaint-status`");
+    expect(defaultStore.tasks[4].description).toContain("task document key `claim-map` and task document key `claim-map-status`");
+    expect(defaultStore.tasks[4].description).toContain("red-team report must attack the draft complaint with weaknesses, candidate MTD attacks, citation/source issues, blockers, and conservative revision recommendations");
+    expect(defaultStore.tasks[5].description).toContain("task document key `red-team-report`");
+    expect(defaultStore.tasks[5].description).toContain("task document key `red-team-report-status`");
+    expect(defaultStore.workflowSteps[0].prompt).toContain("Check task document key red-team-report for unsupported findings, unlinked candidate MTD attack rows, citation issue rows, revision recommendations, unresolved blockers");
+    expect(defaultStore.workflowSteps[1].prompt).toContain("Require task document key red-team-report to attack task document key draft-counter-lawsuit-complaint before passing");
     expect(defaultStore.tasks.every((task) => Boolean(task.assignedAgentId))).toBe(true);
     expect(defaultStore.tasks[0].sourceType).toBe("dashboard_ui");
     expect(defaultStore.tasks[0].sourceMetadata?.workflowRunId).toBe(body.runId);
