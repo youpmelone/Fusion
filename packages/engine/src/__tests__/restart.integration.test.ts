@@ -137,6 +137,7 @@ vi.mock("node:child_process", () => {
 });
 vi.mock("node:fs", () => ({
   existsSync: vi.fn().mockReturnValue(true),
+  lstatSync: vi.fn().mockReturnValue({ isDirectory: () => true, isSymbolicLink: () => false }),
   readdirSync: vi.fn().mockReturnValue([]),
 }));
 vi.mock("node:fs/promises", () => ({
@@ -172,12 +173,13 @@ import { aiMergeTask } from "../merger.js";
 import { WorktreePool, scanIdleWorktrees, cleanupOrphanedWorktrees } from "../worktree-pool.js";
 import { createFnAgent } from "../pi.js";
 import { execSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync } from "node:fs";
 import type { Task, TaskDetail, TaskStep, Column, Settings, StepStatus } from "@fusion/core";
 
 const mockedCreateFnAgent = vi.mocked(createFnAgent);
 const mockedExecSync = vi.mocked(execSync);
 const mockedExistsSync = vi.mocked(existsSync);
+const mockedLstatSync = vi.mocked(lstatSync);
 const mockedReaddirSync = vi.mocked(readdirSync);
 
 // ── Mock helpers ──────────────────────────────────────────────────────────
@@ -308,6 +310,7 @@ function createAgentWithTaskDone() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockedExistsSync.mockReturnValue(true); // Default: worktrees exist (resume scenario)
+  mockedLstatSync.mockReturnValue({ isDirectory: () => true, isSymbolicLink: () => false } as any);
   mockedExecSync.mockImplementation(((cmd: unknown) => {
     if (String(cmd) === "git worktree list --porcelain") {
       return [
@@ -391,6 +394,169 @@ describe("In-progress task resume after restart", () => {
       (call) => typeof call[0] === "string" && call[0].includes("git worktree add"),
     );
     expect(gitWorktreeAddCalls).toHaveLength(0);
+  });
+
+  it.each([
+    {
+      label: "missing assigned path",
+      assignedPath: "/tmp/test/.worktrees/missing-wt",
+      existsAtAssignedPath: false,
+      registeredWorktrees: [],
+    },
+    {
+      label: "unregistered directory",
+      assignedPath: "/tmp/test/.worktrees/unregistered-wt",
+      existsAtAssignedPath: true,
+      registeredWorktrees: [],
+    },
+    {
+      label: "file placeholder",
+      assignedPath: "/tmp/test/.worktrees/file-wt",
+      existsAtAssignedPath: true,
+      registeredWorktrees: ["/tmp/test/.worktrees/file-wt"],
+      lstat: { isDirectory: () => false, isSymbolicLink: () => false },
+    },
+    {
+      label: "symlink placeholder",
+      assignedPath: "/tmp/test/.worktrees/symlink-wt",
+      existsAtAssignedPath: true,
+      registeredWorktrees: ["/tmp/test/.worktrees/symlink-wt"],
+      lstat: { isDirectory: () => true, isSymbolicLink: () => true },
+    },
+    {
+      label: "nested .worktrees path",
+      assignedPath: "/tmp/test/.worktrees/outer/.worktrees/inner",
+      existsAtAssignedPath: false,
+      registeredWorktrees: ["/tmp/test/.worktrees/outer", "/tmp/test/.worktrees/outer/.worktrees/inner"],
+    },
+  ])("does not treat a task's $label as a resumable worktree", async ({ assignedPath, existsAtAssignedPath, registeredWorktrees, lstat }) => {
+    const store = createMockStore();
+    const task = makeTask("FN-022", "in-progress", {
+      worktree: assignedPath,
+      branch: "fusion/fn-022",
+      steps: makeSteps("in-progress", "pending"),
+      currentStep: 0,
+    });
+    store.listTasks.mockResolvedValue([task]);
+    store.getTask.mockResolvedValue(makeTaskDetail("FN-022", "in-progress", {
+      worktree: assignedPath,
+      branch: "fusion/fn-022",
+      steps: makeSteps("in-progress", "pending"),
+      currentStep: 0,
+    }));
+
+    mockedExistsSync.mockImplementation((p) => {
+      const value = String(p);
+      if (value === assignedPath) return existsAtAssignedPath;
+      if (value.startsWith(`${assignedPath}/`)) return existsAtAssignedPath;
+      return true;
+    });
+    mockedLstatSync.mockReturnValue((lstat ?? { isDirectory: () => true, isSymbolicLink: () => false }) as any);
+    mockedExecSync.mockImplementation((cmd: unknown) => {
+      if (String(cmd) === "git worktree list --porcelain") {
+        return [
+          "worktree /tmp/test",
+          "HEAD abc123",
+          "branch refs/heads/main",
+          "",
+          ...registeredWorktrees.flatMap((worktree) => [
+            `worktree ${worktree}`,
+            "HEAD def456",
+            "branch refs/heads/fusion/outer",
+            "",
+          ]),
+        ].join("\n") as any;
+      }
+      return Buffer.from("");
+    });
+    createAgentWithTaskDone();
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await executor.resumeOrphaned();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const worktreeAddCalls = mockedExecSync.mock.calls.filter(
+      (call) => typeof call[0] === "string" && call[0].includes("git worktree add"),
+    );
+    expect(worktreeAddCalls.some((call) => String(call[0]).includes(`"${assignedPath}"`))).toBe(false);
+    expect(store.updateTask).toHaveBeenCalledWith("FN-022", expect.objectContaining({
+      worktree: null,
+      branch: null,
+    }));
+  });
+
+  it("pause/unpause preserves worktree, branch, step progress, and session state when termination is graceful", async () => {
+    const store = createMockStore();
+    const worktree = "/tmp/test/.worktrees/fn-200";
+    const branch = "fusion/fn-200";
+    const sessionFile = "/tmp/root/.fusion/sessions/FN-200.json";
+    const steps = makeSteps("done", "in-progress", "pending");
+    const task = makeTask("FN-200", "in-progress", { worktree, branch, sessionFile, steps, currentStep: 1 });
+    mockRegisteredWorktrees("/tmp/test", ["fn-200"]);
+    store.getTask.mockResolvedValue(makeTaskDetail("FN-200", "in-progress", { worktree, branch, sessionFile, steps, currentStep: 1 }));
+
+    const dispose = vi.fn();
+    mockedCreateFnAgent.mockResolvedValue({
+      session: {
+        prompt: vi.fn().mockImplementation(async () => {
+          await store._trigger("task:updated", { ...task, paused: true });
+        }),
+        dispose,
+      },
+      sessionFile,
+    } as any);
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await executor.execute(task);
+
+    expect(dispose).toHaveBeenCalled();
+    expect(store.moveTask).toHaveBeenCalledWith("FN-200", "todo", { preserveResumeState: true });
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-200", expect.objectContaining({ worktree: null }));
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-200", expect.objectContaining({ branch: null }));
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-200", expect.objectContaining({ sessionFile: null }));
+    expect(task.worktree).toBe(worktree);
+    expect(task.branch).toBe(branch);
+    expect(task.currentStep).toBe(1);
+    expect(task.steps).toEqual(steps);
+  });
+
+  it("pause/unpause preserves worktree, branch, step progress, and session state when termination throws", async () => {
+    const store = createMockStore();
+    const worktree = "/tmp/test/.worktrees/fn-201";
+    const branch = "fusion/fn-201";
+    const sessionFile = "/tmp/root/.fusion/sessions/FN-201.json";
+    const steps = makeSteps("done", "in-progress", "pending");
+    const task = makeTask("FN-201", "in-progress", { worktree, branch, sessionFile, steps, currentStep: 1 });
+    mockRegisteredWorktrees("/tmp/test", ["fn-201"]);
+    store.getTask.mockResolvedValue(makeTaskDetail("FN-201", "in-progress", { worktree, branch, sessionFile, steps, currentStep: 1 }));
+
+    const dispose = vi.fn();
+    mockedCreateFnAgent.mockResolvedValue({
+      session: {
+        prompt: vi.fn().mockImplementation(async () => {
+          await store._trigger("task:updated", { ...task, paused: true });
+          throw new Error("session disposed during pause");
+        }),
+        dispose,
+      },
+      sessionFile,
+    } as any);
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await executor.execute(task);
+
+    const removeCalls = mockedExecSync.mock.calls.filter(
+      (call) => typeof call[0] === "string" && call[0].includes("git worktree remove"),
+    );
+    expect(removeCalls).toHaveLength(0);
+    expect(store.moveTask).toHaveBeenCalledWith("FN-201", "todo", { preserveResumeState: true });
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-201", expect.objectContaining({ worktree: undefined }));
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-201", expect.objectContaining({ branch: undefined }));
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-201", expect.objectContaining({ sessionFile: null }));
+    expect(task.worktree).toBe(worktree);
+    expect(task.branch).toBe(branch);
+    expect(task.currentStep).toBe(1);
+    expect(task.steps).toEqual(steps);
   });
 
   it("resumed task with step progress includes RESUMING section in agent prompt", async () => {

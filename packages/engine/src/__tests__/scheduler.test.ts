@@ -864,6 +864,74 @@ describe("Scheduler", () => {
       expect(updateTask.mock.invocationCallOrder[0]).toBeLessThan(moveTask.mock.invocationCallOrder[0]);
     });
 
+    it("queues dependency-gated tasks without reserving a planned worktree path", async () => {
+      vi.mocked(readFile).mockClear();
+      vi.mocked(existsSync).mockClear();
+
+      const updateTask = vi.fn().mockResolvedValue(undefined);
+      const moveTask = vi.fn().mockResolvedValue(undefined);
+      const store = createMockStore({
+        listTasks: vi.fn().mockResolvedValue([
+          createMockTask({ id: "FN-020", column: "todo" }),
+          createMockTask({ id: "FN-021", column: "todo", dependencies: ["FN-020"] }),
+        ]),
+        getSettings: vi.fn().mockResolvedValue({ maxConcurrent: 2, maxWorktrees: 4, worktreeNaming: "task-id" }),
+        updateTask,
+        moveTask,
+      });
+
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const scheduler = new Scheduler(store);
+      (scheduler as any).running = true;
+      await scheduler.schedule();
+
+      expect(updateTask).toHaveBeenCalledWith("FN-021", { status: "queued" });
+      expect(updateTask).not.toHaveBeenCalledWith("FN-021", expect.objectContaining({
+        worktree: expect.any(String),
+      }));
+      expect(moveTask).not.toHaveBeenCalledWith("FN-021", "in-progress");
+      expect(readFile).not.toHaveBeenCalled();
+    });
+
+    it("clears stale planned worktree metadata when a dependency-gated task is only queued", async () => {
+      vi.mocked(readFile).mockClear();
+      vi.mocked(existsSync).mockClear();
+
+      const staleWorktree = "/test/project/.worktrees/stale-planned";
+      const updateTask = vi.fn().mockResolvedValue(undefined);
+      const moveTask = vi.fn().mockResolvedValue(undefined);
+      const store = createMockStore({
+        listTasks: vi.fn().mockResolvedValue([
+          createMockTask({ id: "FN-020", column: "todo" }),
+          createMockTask({
+            id: "FN-021",
+            column: "todo",
+            dependencies: ["FN-020"],
+            worktree: staleWorktree,
+            branch: "fusion/fn-021",
+          }),
+        ]),
+        getSettings: vi.fn().mockResolvedValue({ maxConcurrent: 2, maxWorktrees: 4, worktreeNaming: "task-id" }),
+        updateTask,
+        moveTask,
+      });
+
+      vi.mocked(existsSync).mockReturnValue(false);
+
+      const scheduler = new Scheduler(store);
+      (scheduler as any).running = true;
+      await scheduler.schedule();
+
+      expect(updateTask).toHaveBeenCalledWith("FN-021", {
+        status: "queued",
+        worktree: null,
+        branch: null,
+      });
+      expect(moveTask).not.toHaveBeenCalledWith("FN-021", "in-progress");
+      expect(readFile).not.toHaveBeenCalled();
+    });
+
     it("reserves unique random worktree names within the same scheduling pass", async () => {
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
