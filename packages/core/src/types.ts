@@ -847,6 +847,18 @@ export type SourceType =
   | "unknown";
 
 /** Provenance metadata for how a task was created. */
+export type DuplicateDisposition = "non-destructive";
+
+/** Metadata persisted on evidence-preserving duplicate tasks. */
+export interface DuplicateDispositionMetadata {
+  /** Canonical task ID this task duplicates. */
+  duplicateOf: string;
+  /** Duplicate closure mode. Non-destructive means the task row, directory, and documents stay intact. */
+  duplicateDisposition: DuplicateDisposition;
+  /** ISO-8601 timestamp when duplicate disposition was applied. */
+  duplicateDispositionAt: string;
+}
+
 export interface TaskSource {
   sourceType: SourceType;
   sourceAgentId?: string;

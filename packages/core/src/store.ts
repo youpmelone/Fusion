@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, watch, type FSWatcher } from "node:fs";
-import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate } from "./types.js";
+import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, DuplicateDispositionMetadata } from "./types.js";
 import { VALID_TRANSITIONS, DEFAULT_SETTINGS, isGlobalSettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
 import { normalizeTaskPriority } from "./task-priority.js";
 import { GlobalSettingsStore } from "./global-settings.js";
@@ -1344,6 +1344,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
     }
     return dependents;
+  }
+
+  private isEvidencePreservingDuplicateTask(task: Pick<Task, "status" | "sourceMetadata">): boolean {
+    return (
+      task.status === "duplicate" &&
+      task.sourceMetadata?.duplicateDisposition === "non-destructive" &&
+      typeof task.sourceMetadata.duplicateOf === "string"
+    );
   }
 
   /**
@@ -3836,6 +3844,64 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return paths;
   }
 
+  async markTaskAsDuplicate(taskId: string, duplicateOfId: string): Promise<Task> {
+    return this.withTaskLock(taskId, async () => {
+      const task = this.readTaskFromDb(taskId);
+      if (!task) {
+        throw new Error(`Task ${taskId} not found`);
+      }
+
+      if (taskId === duplicateOfId) {
+        throw new Error(`Task ${taskId} cannot be marked as a duplicate of itself`);
+      }
+
+      const canonicalTaskExists = this.readTaskFromDb(duplicateOfId) !== undefined || this.archiveDb.get(duplicateOfId) !== undefined;
+      if (!canonicalTaskExists) {
+        throw new Error(`Duplicate target ${duplicateOfId} not found`);
+      }
+
+      const dependentIds = this.findLiveDependents(taskId);
+      if (dependentIds.length > 0) {
+        throw new TaskHasDependentsError(taskId, dependentIds);
+      }
+
+      const previousColumn = task.column;
+      const duplicateDispositionAt = new Date().toISOString();
+      const duplicateMetadata: DuplicateDispositionMetadata = {
+        duplicateOf: duplicateOfId,
+        duplicateDisposition: "non-destructive",
+        duplicateDispositionAt,
+      };
+
+      task.column = "archived";
+      task.status = "duplicate";
+      task.error = undefined;
+      task.blockedBy = undefined;
+      task.columnMovedAt = duplicateDispositionAt;
+      task.updatedAt = duplicateDispositionAt;
+      task.sourceMetadata = {
+        ...(task.sourceMetadata ?? {}),
+        ...duplicateMetadata,
+      };
+      task.log = [
+        ...(task.log ?? []),
+        {
+          timestamp: duplicateDispositionAt,
+          action: `Marked as duplicate of ${duplicateOfId}`,
+          outcome: "Closed non-destructively; task row, directory, and documents are preserved.",
+        },
+      ];
+
+      await mkdir(this.taskDir(taskId), { recursive: true });
+      await this.atomicWriteTaskJson(this.taskDir(taskId), task);
+      this.clearLinkedAgentTaskIds(taskId, task.updatedAt);
+
+      if (this.isWatching) this.taskCache.set(taskId, { ...task });
+      this.emit("task:moved", { task, from: previousColumn, to: "archived" as Column });
+      return task;
+    });
+  }
+
   async deleteTask(id: string, options?: { removeDependencyReferences?: boolean }): Promise<Task> {
     return this.withTaskLock(id, async () => {
       // Flush buffered agent logs inside the lock so no new appends for this
@@ -5802,8 +5868,13 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
 
     const { rm } = await import("node:fs/promises");
+    let migratedCount = 0;
     for (const row of rows) {
       const task = this.rowToTask(row);
+      if (this.isEvidencePreservingDuplicateTask(task)) {
+        continue;
+      }
+
       const archivedAt = task.columnMovedAt ?? task.updatedAt ?? new Date().toISOString();
       const entry = await this.taskToArchiveEntry(task, archivedAt);
       this.archiveDb.upsert(entry);
@@ -5812,9 +5883,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (this.isWatching) {
         this.taskCache.delete(task.id);
       }
+      migratedCount += 1;
     }
 
-    this.db.bumpLastModified();
+    if (migratedCount > 0) {
+      this.db.bumpLastModified();
+    }
   }
 
   /**
@@ -5828,6 +5902,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     for (const task of archivedTasks) {
       const dir = this.taskDir(task.id);
+
+      if (this.isEvidencePreservingDuplicateTask(task)) {
+        continue;
+      }
 
       // Skip if directory already cleaned up
       if (!existsSync(dir)) {
