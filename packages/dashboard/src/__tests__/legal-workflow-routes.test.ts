@@ -5,6 +5,7 @@ import express from "express";
 import { describe, expect, it } from "vitest";
 import { AgentStore, TaskStore } from "@fusion/core";
 import type { Agent, ResearchRun, Task, TaskDocument, WorkflowStep } from "@fusion/core";
+import type { CourtListenerClient } from "../legal-courtlistener.js";
 import type { LegalMcpClient, LegalMcpTool } from "../legal-mcp-client.js";
 import { ApiError, sendErrorResponse } from "../api-error.js";
 import { registerLegalWorkflowRoutes } from "../routes/register-legal-workflow-routes.js";
@@ -167,6 +168,21 @@ class FakeRouteMcpClient implements LegalMcpClient {
   }
 }
 
+class FakeRouteCourtListenerClient implements CourtListenerClient {
+  citationCalls: unknown[] = [];
+  searchCalls: unknown[] = [];
+
+  async lookupCitation(input: any): Promise<unknown> {
+    this.citationCalls.push(input);
+    return { results: [] };
+  }
+
+  async searchAuthorities(input: any): Promise<unknown> {
+    this.searchCalls.push(input);
+    return { results: [] };
+  }
+}
+
 class FakeAgentStore {
   agents: Agent[] = [];
 
@@ -221,6 +237,7 @@ function buildApp(routeDeps: Partial<Parameters<typeof registerLegalWorkflowRout
   } as unknown as ApiRoutesContext;
 
   registerLegalWorkflowRoutes(ctx, {
+    courtListenerClient: new FakeRouteCourtListenerClient(),
     createAgentStore: (store) => agentStores.get(store as FakeTaskStore)!,
     ...routeDeps,
   });
@@ -276,6 +293,8 @@ describe("legal workflow routes", () => {
     expect(defaultAgentStore.agents.every((agent) => JSON.stringify(agent.metadata.skills) === JSON.stringify(["legal-research", "legal-drafting"]))).toBe(true);
     expect(body.vaultMining).toMatchObject({ runId: body.runId, receiptsDocumentKey: "vault-mining-receipts" });
     expect(body.vaultMining.safetyNotice).toContain("not legally verified");
+    expect(body.authorityValidation).toMatchObject({ runId: body.runId, status: "partial", validatedCount: 0 });
+    expect(body.authorityValidation.safetyNotice).toContain("not good-law verification");
   });
 
   it("POST launch automatically runs bounded vault mining and returns the summary", async () => {
@@ -292,6 +311,7 @@ describe("legal workflow routes", () => {
     expect(response.status).toBe(201);
     const body = response.body as any;
     expect(body.vaultMining).toMatchObject({ status: "completed", receiptCount: 6, researchRunId: "RR-1" });
+    expect(body.authorityValidation).toMatchObject({ status: "partial", validatedCount: 0 });
     expect(defaultStore.documents.some((document) => document.key === "vault-mining-receipts" && document.content.includes("vault/qmd.md"))).toBe(true);
     expect(defaultStore.researchStore.runs[0].sources.map((source) => source.reference)).toContain("vault/qmd.md");
     expect(defaultStore.researchStore.runs[0].sources.map((source) => source.reference)).toContain("vault/obsidian.md");
@@ -374,6 +394,7 @@ describe("legal workflow routes", () => {
     expect(body.lineageDocuments[0]).toEqual({ taskId: "DEFAULT-001", documentKey: "counter-lawsuit-run", stage: "research-memo" });
     expect(body.vaultMining).toMatchObject({ runId, receiptsDocumentKey: "vault-mining-receipts" });
     expect(body.vaultMining.safetyNotice).toContain("not promoted for filing");
+    expect(body.authorityValidation).toMatchObject({ runId, authorityValidationDocumentKey: "courtlistener-authority-validation" });
   });
 
   it("GET returns 404 for unknown run IDs", async () => {
@@ -415,7 +436,7 @@ describe("legal workflow routes", () => {
           throw new ApiError(500, error instanceof Error ? error.message : String(error));
         },
       } as unknown as ApiRoutesContext;
-      registerLegalWorkflowRoutes(ctx);
+      registerLegalWorkflowRoutes(ctx, { courtListenerClient: new FakeRouteCourtListenerClient() });
       app.use("/api", router);
       app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
         if (err instanceof ApiError) {
