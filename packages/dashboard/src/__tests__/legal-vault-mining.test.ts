@@ -189,17 +189,33 @@ describe("legal MCP client configuration and allowlist", () => {
     await expect(client.callTool("qmd.update", { query: "Acme" })).rejects.toThrow(/read-only/);
   });
 
-  it("redacts every configured env value in diagnostics", () => {
+  it("redacts every configured env value and provider-prefixed secret flag value in diagnostics", () => {
     const redacted = redactMcpServerConfig({
       command: "cmd",
-      args: ["--header", "Authorization: Bearer obsidian-token-secret-value"],
+      args: [
+        "--header",
+        "Authorization: Bearer obsidian-token-secret-value",
+        "--obsidian-api-key",
+        "obsidian-prefixed-secret-value",
+        "--qmd-token",
+        "qmd-prefixed-secret-value",
+      ],
       env: { SAFE: "value", TOKEN: "secret" },
     });
     expect(redacted.env).toEqual({
       SAFE: "[REDACTED]",
       TOKEN: "[REDACTED]",
     });
-    expect(redacted.args).toEqual(["--header", "[REDACTED]"]);
+    expect(redacted.args).toEqual([
+      "--header",
+      "[REDACTED]",
+      "--obsidian-api-key",
+      "[REDACTED]",
+      "--qmd-token",
+      "[REDACTED]",
+    ]);
+    expect(JSON.stringify(redacted)).not.toContain("obsidian-prefixed-secret-value");
+    expect(JSON.stringify(redacted)).not.toContain("qmd-prefixed-secret-value");
   });
 
   it("times out and closes stdio transports that do not answer MCP initialization", async () => {

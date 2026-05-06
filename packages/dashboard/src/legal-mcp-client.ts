@@ -82,6 +82,12 @@ export function assertAllowedLegalMcpTool(provider: LegalMcpProviderName, toolNa
   }
 }
 
+function isSecretFlagArg(arg: string): boolean {
+  const trimmed = arg.trim();
+  if (!trimmed.startsWith("-") || trimmed.includes("=")) return false;
+  return SECRET_KEY_RE.test(trimmed.replace(/^-+/, ""));
+}
+
 function redactMcpArgs(args: string[] | undefined): string[] | undefined {
   if (!args) return undefined;
   const redacted: string[] = [];
@@ -94,7 +100,7 @@ function redactMcpArgs(args: string[] | undefined): string[] | undefined {
       continue;
     }
     redacted.push(arg);
-    if (/^(?:--)?(?:token|secret|key|password|credential|auth|api-key|api_token)$/i.test(arg)) {
+    if (isSecretFlagArg(arg)) {
       redactNext = true;
     }
   }
