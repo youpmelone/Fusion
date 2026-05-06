@@ -213,7 +213,7 @@ describe("Workspace bootstrap script contract", () => {
 
   it("makes root test changed-only while keeping explicit full-suite and CI-shard commands", () => {
     expect(rootPkg.scripts?.test).toBe("node scripts/test-changed.mjs");
-    expect(rootPkg.scripts?.["test:full"]).toContain("pnpm -r --workspace-concurrency=2 test");
+    expect(rootPkg.scripts?.["test:full"]).toContain("node scripts/test-full-raw.mjs");
     expect(rootPkg.scripts?.["test:full"]).not.toContain("pnpm build");
     expect(rootPkg.scripts?.["test:ci:shard"]).toBe("node scripts/ci-test-shard.mjs");
   });
