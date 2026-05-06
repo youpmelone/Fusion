@@ -153,6 +153,20 @@ describe("research memo input collection", () => {
     expect(result.status).toBe("partial");
   });
 
+  it("ignores conflicting JSON content when metadata is present", async () => {
+    const store = new FakeTaskStore();
+    store.setDocument(
+      VAULT_MINING_RECEIPTS_DOCUMENT_KEY,
+      `# Vault receipts\n\n\`\`\`json\n${JSON.stringify({ receipts: [receipt({ receiptId: "R-JSON", sourcePath: "Vault/json.md" })] })}\n\`\`\``,
+      { receipts: [receipt({ receiptId: "R-META", sourcePath: "Vault/meta.md" })], queries: ["metadata query"] },
+    );
+    store.setDocument(COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY, "# Authority", { validationRecords: [authority()] });
+    const result = await collectCounterLawsuitResearchMemoInputs({ taskStore: store as never, runId: "CLW-1" });
+    expect(result.sourceDocuments.find((doc) => doc.key === VAULT_MINING_RECEIPTS_DOCUMENT_KEY)?.parsedFrom).toBe("metadata");
+    expect(result.evidence.map((item) => item.receiptId)).toEqual(["R-META"]);
+    expect(JSON.stringify(result)).not.toContain("R-JSON");
+  });
+
   it("falls back to the machine-readable JSON block when metadata is absent", async () => {
     const store = new FakeTaskStore();
     seedPrerequisites(store, { receipts: [receipt({ receiptId: "R-JSON", sourcePath: "Vault/json.md" })], vaultMetadata: false });
@@ -216,12 +230,13 @@ describe("research memo generation", () => {
 
   it("redacts secret-like values from memo content and metadata", async () => {
     const store = new FakeTaskStore();
-    seedPrerequisites(store, { receipts: [receipt({ excerpt: "token=super-secret-token-value authorization: bearer abcdefghijklmnop" })] });
+    seedPrerequisites(store, { receipts: [receipt({ excerpt: "token=super-secret-token-value authorization: bearer abcdefghijklmnop --obsidian-api-key standalone-secret-value" })] });
     await generateCounterLawsuitResearchMemo({ taskStore: store as never, runId: "CLW-1" });
     const memo = await store.getTaskDocument("FN-1", RESEARCH_MEMO_DOCUMENT_KEY);
     const serialized = `${memo?.content}\n${JSON.stringify(memo?.metadata)}`;
     expect(serialized).not.toContain("super-secret-token-value");
     expect(serialized).not.toContain("abcdefghijklmnop");
+    expect(serialized).not.toContain("standalone-secret-value");
     expect(serialized).toContain("[REDACTED]");
   });
 

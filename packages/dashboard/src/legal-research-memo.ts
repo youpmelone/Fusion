@@ -3,20 +3,15 @@ import {
   COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY,
   COURTLISTENER_SAFETY_NOTICE,
   COURTLISTENER_STATUS_DOCUMENT_KEY,
-  type CourtListenerAuthorityValidationRecord,
   type CourtListenerProviderDiagnostic,
 } from "./legal-courtlistener.js";
 import {
   VAULT_MINING_RECEIPTS_DOCUMENT_KEY,
   VAULT_MINING_SAFETY_NOTICE,
   VAULT_MINING_STATUS_DOCUMENT_KEY,
-  type PersistedVaultMiningReceipt,
   type VaultMiningProviderDiagnostic,
 } from "./legal-vault-mining.js";
-import {
-  COUNTER_LAWSUIT_STAGE_DOCUMENT_KEY,
-  COUNTER_LAWSUIT_WORKFLOW_KIND,
-} from "./legal-workflow-orchestrator.js";
+import { COUNTER_LAWSUIT_WORKFLOW_KIND } from "./legal-workflow-orchestrator.js";
 import { notFound } from "./api-error.js";
 
 export const RESEARCH_MEMO_DOCUMENT_KEY = "research-memo";
@@ -148,9 +143,12 @@ const MAX_TEXT_CHARS = 900;
 const MAX_CONCLUSION_CHARS = 700;
 const MAX_DIAGNOSTICS = 25;
 const TOKEN_RE = /["']?(?:authorization)["']?\s*[:=]\s*["']?(?:bearer|token)\s+[^"'\s,}]{8,}["']?|["']?(?:token|secret|api[_-]?key|password|credential|auth)["']?\s*[:=]\s*["']?[^"'\s,}]{8,}["']?|bearer\s+\S{8,}|Token\s+\S{8,}|(?:sk|pk|ghp|github_pat|obsidian)[A-Za-z0-9_:\-.=+/]{8,}/gi;
+const SECRET_FLAG_VALUE_RE = /(--[A-Za-z0-9_.-]*(?:token|secret|key|password|credential|auth)[A-Za-z0-9_.-]*)(\s+)(?:"[^"]+"|'[^']+'|\S+)/gi;
 
 function redactSecrets(value: string): string {
-  return value.replace(TOKEN_RE, "[REDACTED]");
+  return value
+    .replace(SECRET_FLAG_VALUE_RE, "$1$2[REDACTED]")
+    .replace(TOKEN_RE, "[REDACTED]");
 }
 
 function boundedText(value: unknown, maxChars = MAX_TEXT_CHARS): string | undefined {
@@ -222,16 +220,16 @@ function parseManifestFromDocument(document: TaskDocument | null, key: string): 
   }
 
   const metadata = asRecord(document.metadata);
-  const jsonManifest = parseJsonBlock(document.content);
   if (metadata && Object.keys(metadata).length > 0) {
     return {
       document,
       source: "metadata",
-      manifest: jsonManifest ? { ...jsonManifest, ...metadata } : metadata,
+      manifest: metadata,
       diagnostics: [],
     };
   }
 
+  const jsonManifest = parseJsonBlock(document.content);
   if (jsonManifest) {
     return { document, source: "json-block", manifest: jsonManifest, diagnostics: [] };
   }
