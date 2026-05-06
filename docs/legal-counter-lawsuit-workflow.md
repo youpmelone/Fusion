@@ -366,7 +366,7 @@ Fetch derived run status with:
 GET /api/legal-workflows/counter-lawsuit/runs/:runId
 ```
 
-The status endpoint finds tasks whose `sourceMetadata.workflowRunId` matches the run ID. It returns the stage task statuses, artifact keys, safety gates, source scope status, lineage document references, the current vault-mining summary, the current CourtListener authority-validation summary, the current research memo summary, the current evidence ledger summary, the current claim-map summary, the current draft complaint summary, and the current red-team report summary.
+The status endpoint finds tasks whose `sourceMetadata.workflowRunId` matches the run ID. It returns the stage task statuses, artifact keys, safety gates, source scope status, lineage document references, the current vault-mining summary, the current CourtListener authority-validation summary, the current research memo summary, the current evidence ledger summary, the current claim-map summary, the current draft complaint summary, the current red-team report summary, and the current lineage/scoring log summary.
 
 The `authorityValidation` status includes the research run ID, candidate count, matched count, unmatched/ambiguous/unavailable count, diagnostics, safety notice, and document key references for `courtlistener-authority-validation` and `courtlistener-status` when present.
 
@@ -380,7 +380,38 @@ The `draftComplaint` status includes status, draft complaint document key, statu
 
 The `redTeamReport` status includes status, red-team report document key, status document key when present, finding count, candidate MTD attack count, citation/source issue count, revision recommendation count, unresolved blocker count, reviewed paragraph count, reviewed claim count, diagnostics, and safety notice. If `red-team-report-status` reports blocked, partial, failed, stale, or unresolved prerequisites, status preserves that blocker instead of treating a stale primary report as completed critique. Older runs without a red-team stage return `redTeamReport.status: "not-run"` while preserving earlier summaries.
 
+The `lineageScoringLog` status includes status, lineage/scoring document key, status document key when present, prompt trace count, search trace count, draft version count, critique score count, rejected variant count, promotion decision, unresolved blocker count, diagnostics, and safety notice. If `lineage-scoring-log-status` reports blocked, partial, failed, stale, or unresolved prerequisites, status preserves that blocker instead of treating a stale primary log as completed verification. Older runs without a lineage/scoring stage return `lineageScoringLog.status: "not-run"` while preserving earlier summaries.
+
 Unknown run IDs return `404`.
+
+## Full-run verification
+
+The automated full-run coverage lives in `packages/dashboard/src/__tests__/legal-workflow-full-run.test.ts`.
+
+Run only that verification with:
+
+```bash
+pnpm --filter @fusion/dashboard exec vitest run --silent=passed-only --reporter=dot src/__tests__/legal-workflow-full-run.test.ts
+```
+
+The test launches one counter-lawsuit workflow through `/api/legal-workflows/counter-lawsuit/runs` and then checks the launch and status responses plus the persisted task documents for all six generated artifacts:
+
+1. `research-memo`
+2. `evidence-ledger`
+3. `claim-map`
+4. `draft-counter-lawsuit-complaint`
+5. `red-team-report`
+6. `lineage-scoring-log`
+
+The fixture boundaries are deterministic. QMD MCP, Obsidian MCP, CourtListener, agent execution, red-team generation, and lineage/scoring generation are mocked or injected through route test seams, so the test never calls live MCP servers, live CourtListener, live Codex, live AI sessions, or a dashboard server on port 4040.
+
+The positive path proves artifact production and run/status reporting. It asserts source paths and mining receipts, CourtListener lookup-only citation status, proof gaps, draft-only complaint safety wording, opposing-counsel critique, revision recommendations, prompt/search lineage, draft versions, critique scores, rejected variants, and a `not-promoted` promotion rationale.
+
+The negative paths prove that incomplete runs cannot be mistaken for verified full runs. Missing artifacts, unavailable providers, stale status documents, and malformed manifests must return blocked, partial, failed, stale, or not-run summaries instead of completed summaries.
+
+Status documents take precedence over primary artifacts whenever they record blockers or stale prerequisites. A malformed primary manifest is surfaced as a diagnostic and failure-mode status, not silently parsed as a completed artifact.
+
+The verification is still a workflow-artifact test only. It does not prove legal advice, good-law status, citation-format validation, human verification, filing readiness, or promotion for filing.
 
 ## Generated stage DAG
 
