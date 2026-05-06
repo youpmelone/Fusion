@@ -413,7 +413,10 @@ describe("generated legal workflow prompts", () => {
       expect(task.description).toContain("Mine facts through QMD MCP and Obsidian MCP when those integrations are available");
       expect(task.description).toContain("Read task document key `courtlistener-authority-validation` when it exists");
       expect(task.description).toContain("Treat missing, unmatched, ambiguous, or unavailable CourtListener results as unresolved authority gaps");
-      expect(task.description).toContain("does not verify legal conclusions, good-law status, filing readiness, or attorney judgment");
+      expect(task.description).toContain("not good-law verification");
+      expect(task.description).toContain("not citation-format validation");
+      expect(task.description).toContain("not filing-ready");
+      expect(task.description).toContain("not promoted for filing");
       expect(task.description).toContain("explicitly mark the affected facts, evidence, authorities, or receipts as unverified");
       expect(task.description).toContain("Do not invent citations, quotes, docket entries, CourtListener matches, or source receipts");
       expect(task.description).toContain(`Write the primary output to task document key \`${expectedDocumentKey}\``);
@@ -425,6 +428,11 @@ describe("generated legal workflow prompts", () => {
 
     expect(taskStore.tasks[0].description).toContain("`vault-mining-receipts` as the required first source manifest");
     expect(taskStore.tasks[0].description).toContain("source-linked but unverified");
+    expect(taskStore.tasks[0].description).toContain("`research-memo-status` blockers as unresolved prerequisites");
+    expect(taskStore.tasks[1].description).toContain("read task document key `research-memo` from the research-memo stage task");
+    expect(taskStore.tasks[1].description).toContain("research-memo-status` reports blocked, partial, or failed status");
+    expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key research-memo for source-linked evidence");
+    expect(taskStore.workflowSteps[0].prompt).toContain("Check task document key research-memo-status");
 
     const allDocumentContent = taskStore.documents.map((document) => document.content).join("\n---\n");
     const stageDocumentContent = taskStore.documents.filter((document) => document.key === COUNTER_LAWSUIT_STAGE_DOCUMENT_KEY).map((document) => document.content).join("\n");
@@ -439,8 +447,13 @@ describe("generated legal workflow prompts", () => {
     expect(stageDocumentContent).toContain("Read task document key `vault-mining-receipts` as the required first source manifest");
     expect(stageDocumentContent).toContain("does not legally verify facts or validate citations");
     expect(stageDocumentContent).toContain("Read task document key `courtlistener-authority-validation` when present");
+    expect(stageDocumentContent).toContain("Read task document key `research-memo` from the research-memo stage task");
+    expect(stageDocumentContent).toContain("research-memo-status` blocked, partial, or failed entries as unresolved prerequisites");
     expect(stageDocumentContent).toContain("Missing, unmatched, ambiguous, or unavailable CourtListener validation remains an unresolved authority gap");
-    expect(stageDocumentContent).toContain("does not verify legal conclusions, good-law status, filing readiness, or attorney judgment");
+    expect(stageDocumentContent).toContain("not good-law verification");
+    expect(stageDocumentContent).toContain("not citation-format validation");
+    expect(stageDocumentContent).toContain("not filing-ready");
+    expect(stageDocumentContent).toContain("not promoted for filing");
     for (const key of ["research-memo", "evidence-ledger", "claim-map", "draft-counter-lawsuit-complaint", "red-team-report", "lineage-scoring-log"]) {
       expect(stageDocumentContent).toContain(`Output document key: ${key}`);
     }
