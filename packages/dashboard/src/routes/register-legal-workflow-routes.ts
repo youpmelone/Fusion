@@ -7,6 +7,17 @@ import {
   type CounterLawsuitWorkflowLaunchInput,
 } from "../legal-workflow-orchestrator.js";
 import {
+  COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY,
+  COURTLISTENER_SAFETY_NOTICE,
+  deriveAuthorityValidationStatusForRun,
+  validateCounterLawsuitAuthorities,
+  validateCourtListenerRetryRequest,
+  type CourtListenerAuthorityValidationRequest,
+  type CourtListenerAuthorityValidationResult,
+  type CourtListenerClient,
+  type CourtListenerProviderDiagnostic,
+} from "../legal-courtlistener.js";
+import {
   deriveVaultMiningStatusForRun,
   mineCounterLawsuitVaultSources,
   validateVaultMiningOverrides,
@@ -23,6 +34,8 @@ export interface LegalWorkflowRouteDeps {
   createAgentStore?: (store: TaskStore) => Promise<Pick<AgentStoreType, "listAgents" | "createAgent" | "updateAgent">> | Pick<AgentStoreType, "listAgents" | "createAgent" | "updateAgent">;
   mcpClientFactory?: LegalVaultMcpClientFactory;
   searchProjectMemoryFn?: Parameters<typeof mineCounterLawsuitVaultSources>[0]["searchProjectMemoryFn"];
+  courtListenerClient?: CourtListenerClient;
+  courtListenerClientFactory?: () => CourtListenerClient;
   now?: () => Date;
 }
 
@@ -34,6 +47,19 @@ export interface LegalWorkflowVaultMiningSummary {
   receiptsDocumentKey?: string;
   statusDocumentKey?: string;
   providerDiagnostics: VaultMiningProviderDiagnostic[];
+  safetyNotice: string;
+}
+
+export interface LegalWorkflowAuthorityValidationSummary {
+  runId: string;
+  status: CourtListenerAuthorityValidationResult["status"] | "not-run";
+  researchRunId?: string;
+  candidateCount: number;
+  validatedCount: number;
+  unmatchedCount: number;
+  diagnostics: CourtListenerProviderDiagnostic[];
+  authorityValidationDocumentKey?: string;
+  statusDocumentKey?: string;
   safetyNotice: string;
 }
 
@@ -134,6 +160,58 @@ async function runVaultMiningForResponse(params: {
   }
 }
 
+function authorityValidationFailureSummary(runId: string): LegalWorkflowAuthorityValidationSummary {
+  return {
+    runId,
+    status: "failed",
+    candidateCount: 0,
+    validatedCount: 0,
+    unmatchedCount: 0,
+    authorityValidationDocumentKey: COURTLISTENER_AUTHORITY_VALIDATION_DOCUMENT_KEY,
+    diagnostics: [{
+      providerName: "courtlistener",
+      status: "error",
+      message: "CourtListener authority validation failed before results were persisted. Stage tasks remain queued; retry the authority-validation endpoint after checking provider availability.",
+    }],
+    safetyNotice: COURTLISTENER_SAFETY_NOTICE,
+  };
+}
+
+async function runAuthorityValidationForResponse(params: {
+  store: TaskStore;
+  runId: string;
+  launchInput?: CounterLawsuitWorkflowLaunchInput;
+  request?: Partial<CourtListenerAuthorityValidationRequest>;
+  deps: LegalWorkflowRouteDeps;
+}): Promise<LegalWorkflowAuthorityValidationSummary> {
+  try {
+    const result = await validateCounterLawsuitAuthorities({
+      taskStore: params.store,
+      runId: params.runId,
+      launchInput: params.launchInput,
+      request: params.request,
+      client: params.deps.courtListenerClient,
+      clientFactory: params.deps.courtListenerClientFactory,
+      now: params.deps.now,
+    });
+    return {
+      runId: result.runId ?? params.runId,
+      status: result.status,
+      researchRunId: result.researchRunId,
+      candidateCount: result.candidateCount,
+      validatedCount: result.validatedCount,
+      unmatchedCount: result.unmatchedCount,
+      diagnostics: result.diagnostics,
+      authorityValidationDocumentKey: result.authorityValidationDocumentKey,
+      statusDocumentKey: result.statusDocumentKey,
+      safetyNotice: result.safetyNotice,
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.statusCode === 404) throw error;
+    return authorityValidationFailureSummary(params.runId);
+  }
+}
+
 export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWorkflowRouteDeps = {}): void {
   const { router, getProjectContext, rethrowAsApiError } = ctx;
   const createAgentStore = deps.createAgentStore ?? defaultCreateAgentStore;
@@ -152,7 +230,13 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         launchInput: req.body as CounterLawsuitWorkflowLaunchInput,
         deps,
       });
-      res.status(201).json({ ...response, vaultMining });
+      const authorityValidation = await runAuthorityValidationForResponse({
+        store: scopedStore,
+        runId: response.runId,
+        launchInput: req.body as CounterLawsuitWorkflowLaunchInput,
+        deps,
+      });
+      res.status(201).json({ ...response, vaultMining, authorityValidation });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;
@@ -185,6 +269,30 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
     }
   });
 
+  router.post("/legal-workflows/counter-lawsuit/runs/:runId/authority-validation", async (req, res) => {
+    try {
+      if (!req.params.runId?.trim()) throw badRequest("runId is required");
+      const { store: scopedStore } = await getProjectContext(req);
+      const request = validateCourtListenerRetryRequest(req.body);
+      await getCounterLawsuitWorkflowRunStatus({
+        taskStore: scopedStore,
+        runId: req.params.runId,
+      });
+      const authorityValidation = await runAuthorityValidationForResponse({
+        store: scopedStore,
+        runId: req.params.runId,
+        request,
+        deps,
+      });
+      res.json(authorityValidation);
+    } catch (error: unknown) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      rethrowAsApiError(error);
+    }
+  });
+
   router.get("/legal-workflows/counter-lawsuit/runs/:runId", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
@@ -196,7 +304,11 @@ export function registerLegalWorkflowRoutes(ctx: ApiRoutesContext, deps: LegalWo
         taskStore: scopedStore,
         runId: req.params.runId,
       });
-      res.json({ ...status, vaultMining });
+      const authorityValidation = await deriveAuthorityValidationStatusForRun({
+        taskStore: scopedStore,
+        runId: req.params.runId,
+      });
+      res.json({ ...status, vaultMining, authorityValidation });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
         throw error;

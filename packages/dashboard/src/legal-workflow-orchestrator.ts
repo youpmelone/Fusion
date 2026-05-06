@@ -163,7 +163,7 @@ const SAFETY_WORKFLOW_STEP_INPUTS = [
     templateId: "counter-lawsuit-citation-source-verification",
     name: "Counter-lawsuit citation/source verification",
     description: "Requires source receipts and legal authority verification for legal workflow outputs.",
-    prompt: `Review the task output for citation and source support. REQUEST REVISION if any factual claim, quotation, procedural assertion, or evidence reference lacks a source receipt. REQUEST REVISION if any cited legal authority lacks CourtListener validation when that validation is available, if any legal authority remains unverified, or if unverified material is presented as usable support. Do not pass unsupported facts, unverified authorities, or invented citations. Unverified labels are useful for discovery notes, but they do not satisfy this completion gate.`, 
+    prompt: `Review the task output for citation and source support. Check task document key courtlistener-authority-validation when legal authorities are cited and the document exists. REQUEST REVISION if any factual claim, quotation, procedural assertion, or evidence reference lacks a source receipt. REQUEST REVISION if any cited legal authority is used as support without a matched CourtListener record when validation is available, or if missing, unmatched, ambiguous, or unavailable CourtListener results are presented as usable support. Do not pass unsupported facts, unverified authorities, or invented citations. Explicitly labeled unverified authority notes may remain only as unresolved research gaps; they do not satisfy this completion gate as support.`, 
   },
   {
     templateId: "counter-lawsuit-opposing-counsel-red-team",
@@ -416,9 +416,11 @@ Use the existing installed Codex legal skills assigned to this durable agent (${
 Do not embed, rewrite, or vendor Codex legal skill content in this task. Invoke the installed skills through the agent runtime skill-selection path.
 
 ## Integration handoff
-${stage.stage === "research-memo" ? "Before drafting the research memo, read task document key `vault-mining-receipts` as the required first source manifest when it exists. Treat every vault-mining receipt as source-linked but unverified until later safety gates pass.\n\n" : ""}Mine facts through QMD MCP and Obsidian MCP when those integrations are available. Use CourtListener validation where legal authority validation is available.
+${stage.stage === "research-memo" ? "Before drafting the research memo, read task document key `vault-mining-receipts` as the required first source manifest when it exists. Treat every vault-mining receipt as source-linked but unverified until later safety gates pass.\n\n" : ""}Mine facts through QMD MCP and Obsidian MCP when those integrations are available. Read task document key \`courtlistener-authority-validation\` when it exists before relying on legal authorities or citations; the manifest is expected on the research-memo stage task after validation runs.
 
-If QMD MCP, Obsidian MCP, CourtListener, or any other integration is unavailable, explicitly mark the affected facts, evidence, authorities, or receipts as unverified. Do not invent citations, quotes, docket entries, or source receipts.
+Treat missing, unmatched, ambiguous, or unavailable CourtListener results as unresolved authority gaps. CourtListener lookup can identify a record or citation match, but it does not verify legal conclusions, good-law status, filing readiness, or attorney judgment.
+
+If QMD MCP, Obsidian MCP, CourtListener, or any other integration is unavailable, explicitly mark the affected facts, evidence, authorities, or receipts as unverified. Do not invent citations, quotes, docket entries, CourtListener matches, or source receipts.
 
 ## Upstream dependencies
 ${upstreamText}
@@ -462,7 +464,9 @@ function buildStageDocument(params: {
 ${stage.promptPurpose}
 
 ## Integration expectations
-${stage.stage === "research-memo" ? "Read task document key `vault-mining-receipts` as the required first source manifest when present. It contains source-linked receipts only; it does not legally verify facts or validate citations.\n\n" : ""}Use existing installed Codex legal skills through assigned-agent metadata. Mine facts through QMD MCP and Obsidian MCP when available. Validate authorities through CourtListener when available. Mark unavailable integration results as unverified rather than inventing citations.
+${stage.stage === "research-memo" ? "Read task document key `vault-mining-receipts` as the required first source manifest when present. It contains source-linked receipts only; it does not legally verify facts or validate citations.\n\n" : ""}Use existing installed Codex legal skills through assigned-agent metadata. Mine facts through QMD MCP and Obsidian MCP when available. Read task document key \`courtlistener-authority-validation\` when present before relying on authorities. Missing, unmatched, ambiguous, or unavailable CourtListener validation remains an unresolved authority gap; do not invent citations or CourtListener matches.
+
+CourtListener lookup evidence does not verify legal conclusions, good-law status, filing readiness, or attorney judgment.
 
 ## Safety boundary
 Outputs are drafts only. They are not promoted or reliable until source/citation verification, opposing-counsel red-team review, lineage preservation, and qualified human verification pass.`;
