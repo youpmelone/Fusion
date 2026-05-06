@@ -1966,12 +1966,12 @@ export class TriageProcessor {
 
     if (dupMatch) {
       const dupId = dupMatch[1];
-      planLog.log(`${task.id} is a duplicate of ${dupId} — closing`);
+      planLog.log(`${task.id} is a duplicate of ${dupId} — closing non-destructively`);
       await this.store.logEntry(
         task.id,
-        `Duplicate of ${dupId} — closed`,
+        `Duplicate of ${dupId} — closed non-destructively; task documents preserved`,
       );
-      await this.store.deleteTask(task.id);
+      await this.store.markTaskAsDuplicate(task.id, dupId);
       return;
     }
 
