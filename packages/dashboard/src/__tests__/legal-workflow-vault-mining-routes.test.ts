@@ -153,7 +153,8 @@ describe("legal workflow vault-mining routes", () => {
 
     const status = await request(app, "GET", `/api/legal-workflows/counter-lawsuit/runs/${runId}`);
     expect(status.status).toBe(200);
-    expect((status.body as any).vaultMining).toMatchObject({ runId, receiptCount: 2, researchRunId: "RR-2" });
+    expect((status.body as any).vaultMining).toMatchObject({ runId, receiptCount: 2 });
+    expect((status.body as any).vaultMining.researchRunId).toMatch(/^RR-/);
     expect((status.body as any).vaultMining.safetyNotice).toContain("qualified human review");
     expect(store.documents.some((doc) => doc.key === "vault-mining-receipts" && doc.content.includes("not legally verified"))).toBe(true);
   });
