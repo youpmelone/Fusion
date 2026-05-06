@@ -222,7 +222,7 @@ describe("CourtListener authority normalization", () => {
     expect(empty.validatedCount).toBe(0);
 
     const single = await validateAuthorityCandidatesWithCourtListener({
-      client: new FakeCourtListenerClient({ "1 U.S. 1": [{ citation: "1 U.S. 1", clusters: [{ case_name: "Single" }] }] }),
+      client: new FakeCourtListenerClient({ "1 U.S. 1": [{ citation: "1 U.S. 1", clusters: [{ case_name: "Single", absolute_url: "/opinion/1/single/" }] }] }),
       request: { citations: ["1 U.S. 1"] },
     });
     expect(single.validationRecords[0]).toMatchObject({ status: "matched", caseName: "Single" });
@@ -291,7 +291,7 @@ describe("CourtListener authority normalization", () => {
 
 describe("CourtListener authority validation service", () => {
   it("validates citation and query candidates while preserving no-legal-conclusion defaults", async () => {
-    const client = new FakeCourtListenerClient({ results: [{ citation: "410 U.S. 113", case_name: "Roe v. Wade" }] });
+    const client = new FakeCourtListenerClient({ results: [{ citation: "410 U.S. 113", case_name: "Roe v. Wade", absolute_url: "/opinion/108713/roe-v-wade/" }] });
     const result = await validateAuthorityCandidatesWithCourtListener({
       client,
       request: { runId: "CLW-1", citations: ["410 U.S. 113"], queries: ["Roe v Wade"], maxResultsPerCandidate: 1 },
@@ -399,6 +399,22 @@ describe("counter-lawsuit CourtListener persistence", () => {
     const status = await store.getTaskDocument("FN-1", COURTLISTENER_STATUS_DOCUMENT_KEY);
     expect(status?.content).toContain("Retry needed: yes");
     expect(status?.content).toContain("No bounded citation or authority candidates");
+  });
+
+  it("does not persist citation-only echoes as matched web sources", async () => {
+    const store = new FakeTaskStore();
+    const result = await validateCounterLawsuitAuthorities({
+      taskStore: store as any,
+      runId: "CLW-1",
+      request: { citations: ["1 U.S. 1"] },
+      client: new FakeCourtListenerClient({ results: [{ citation: "1 U.S. 1" }] }),
+    });
+
+    expect(result.status).toBe("partial");
+    expect(result.validatedCount).toBe(0);
+    expect(result.validationRecords[0].status).toBe("not-found");
+    expect(store.researchStore.runs[0].sources).toHaveLength(0);
+    expect(JSON.stringify(store.researchStore.runs[0])).not.toContain("courtlistener:1 U.S. 1");
   });
 
   it("persists unavailable diagnostics redacted and does not mark legal conclusions verified", async () => {

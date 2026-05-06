@@ -366,21 +366,25 @@ export function normalizeCourtListenerAuthorityRecord(params: {
   const caseName = pickString(record, ["caseName", "case_name", "caseNameShort", "case_name_short", "caption", "name"]);
   const court = pickString(record, ["court", "court_id", "courtName", "court_name"]) ?? pickString(cluster ?? {}, ["court", "court_id", "courtName", "court_name"]);
   const dateFiled = pickString(record, ["dateFiled", "date_filed", "date", "filed"]);
-  const clusterId = pickString(record, ["cluster_id", "clusterId", "id"]) ?? pickString(cluster ?? {}, ["id"]);
+  const clusterId = pickString(record, ["cluster_id", "clusterId", "clusterIdString"]) ?? pickString(cluster ?? {}, ["id", "cluster_id", "clusterId"]);
   const opinionId = pickString(record, ["opinion_id", "opinionId"]) ?? pickString(opinion ?? {}, ["id"]);
   const absoluteUrl = pickString(record, ["absolute_url", "absoluteUrl"]) ?? pickString(cluster ?? {}, ["absolute_url", "absoluteUrl"]);
-  const courtListenerUrl = absoluteCourtListenerUrl(absoluteUrl, pickString(record, ["courtListenerUrl", "court_listener_url", "url", "download_url"]));
+  const explicitCourtListenerUrl = absoluteCourtListenerUrl(absoluteUrl, pickString(record, ["courtListenerUrl", "court_listener_url", "url", "download_url"]));
+  const synthesizedUrl = explicitCourtListenerUrl ?? (absoluteUrl ? absoluteCourtListenerUrl(absoluteUrl) : undefined)
+    ?? (clusterId ? `https://www.courtlistener.com/opinion/${encodeURIComponent(clusterId)}/` : undefined)
+    ?? (opinionId ? `${COURTLISTENER_DEFAULT_BASE_URL}/opinions/${encodeURIComponent(opinionId)}/` : undefined);
+  const status = params.status === "matched" && !synthesizedUrl && !absoluteUrl && !clusterId && !opinionId ? "not-found" : params.status;
   const hash = contentHash({
     input: params.input,
     inputType: params.inputType,
-    status: params.status,
+    status,
     normalizedCitation,
     caseName,
     court,
     dateFiled,
     clusterId,
     opinionId,
-    courtListenerUrl,
+    courtListenerUrl: synthesizedUrl,
     absoluteUrl,
   });
 
@@ -388,14 +392,14 @@ export function normalizeCourtListenerAuthorityRecord(params: {
     recordId: `CLV-${hash.slice(0, 16)}`,
     input: params.input,
     inputType: params.inputType,
-    status: params.status,
+    status,
     normalizedCitation,
     caseName,
     court,
     dateFiled,
     clusterId,
     opinionId,
-    courtListenerUrl,
+    courtListenerUrl: synthesizedUrl,
     absoluteUrl,
     retrievedAt,
     hash,
@@ -514,21 +518,22 @@ export async function validateAuthorityCandidatesWithCourtListener(params: {
       const raw = candidate.inputType === "citation"
         ? await params.client.lookupCitation({ citation: candidate.input, maxResults })
         : await params.client.searchAuthorities({ query: candidate.input, maxResults });
-      const status = statusFromRaw(raw);
-      validationRecords.push(normalizeCourtListenerAuthorityRecord({
+      const rawStatus = statusFromRaw(raw);
+      const record = normalizeCourtListenerAuthorityRecord({
         input: candidate.input,
         inputType: candidate.inputType,
-        status,
+        status: rawStatus,
         rawResult: raw,
         retrievedAt: now().toISOString(),
-      }));
+      });
+      validationRecords.push(record);
       diagnostics.push({
         providerName: "courtlistener",
-        status: status === "matched" ? "available" : "partial",
-        message: `CourtListener ${candidate.inputType} lookup returned ${status} for a bounded candidate.`,
+        status: record.status === "matched" ? "available" : "partial",
+        message: `CourtListener ${candidate.inputType} lookup returned ${record.status} for a bounded candidate.`,
         endpoint: candidate.inputType === "citation" ? "citation-lookup" : "search",
         candidate: candidate.input,
-        acceptedCount: status === "matched" ? 1 : 0,
+        acceptedCount: record.status === "matched" ? 1 : 0,
       });
     } catch (error) {
       validationRecords.push(normalizeCourtListenerAuthorityRecord({
@@ -709,11 +714,11 @@ function persistCourtListenerResearchRun(params: {
   result: CourtListenerAuthorityValidationResult;
 }): ResearchRun {
   const sources: ResearchSource[] = params.result.validationRecords
-    .filter((record) => record.status === "matched")
+    .filter((record) => record.status === "matched" && Boolean(record.courtListenerUrl ?? record.absoluteUrl))
     .map((record) => ({
       id: record.recordId,
       type: "web",
-      reference: record.courtListenerUrl ?? record.absoluteUrl ?? `courtlistener:${record.input}`,
+      reference: record.courtListenerUrl ?? record.absoluteUrl ?? COURTLISTENER_DEFAULT_BASE_URL,
       title: record.caseName ?? record.normalizedCitation ?? record.input,
       excerpt: boundedText(`${record.normalizedCitation ?? record.input}${record.caseName ? ` — ${record.caseName}` : ""}`, 500),
       content: boundedText(`${record.normalizedCitation ?? record.input}${record.caseName ? ` — ${record.caseName}` : ""}`, 500),
