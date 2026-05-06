@@ -78,6 +78,7 @@ function authority(overrides: Record<string, unknown> = {}): Record<string, unkn
 class FakeTaskStore {
   tasks: Task[] = [makeTask("FN-1", "research-memo"), makeTask("FN-2", "evidence-ledger")];
   documents = new Map<string, TaskDocument>();
+  failNextMemoUpsert = false;
 
   async listTasks(): Promise<Task[]> {
     return this.tasks;
@@ -88,6 +89,10 @@ class FakeTaskStore {
   }
 
   async upsertTaskDocument(taskId: string, input: { key: string; content: string; author?: string; metadata?: Record<string, unknown> }): Promise<TaskDocument> {
+    if (this.failNextMemoUpsert && input.key === RESEARCH_MEMO_DOCUMENT_KEY) {
+      this.failNextMemoUpsert = false;
+      throw new Error("writer failed --qmd-token super-secret-token-value");
+    }
     const doc = {
       id: `${taskId}:${input.key}`,
       taskId,
@@ -220,12 +225,39 @@ describe("research memo generation", () => {
     expect(memo?.metadata).toMatchObject({ runId: "CLW-1", evidence: expect.any(Array), authorities: expect.any(Array), safetyNotice: expect.any(String) });
   });
 
+  it("overwrites stale blocker status after a completed retry", async () => {
+    const store = new FakeTaskStore();
+    await generateCounterLawsuitResearchMemo({ taskStore: store as never, runId: "CLW-1" });
+    expect((await store.getTaskDocument("FN-1", RESEARCH_MEMO_STATUS_DOCUMENT_KEY))?.metadata?.status).toBe("blocked");
+    seedPrerequisites(store);
+    store.setDocument(COURTLISTENER_STATUS_DOCUMENT_KEY, "# status", { status: "completed" });
+    const result = await generateCounterLawsuitResearchMemo({ taskStore: store as never, runId: "CLW-1", force: true });
+    const status = await store.getTaskDocument("FN-1", RESEARCH_MEMO_STATUS_DOCUMENT_KEY);
+    const summary = await deriveResearchMemoStatusForRun({ taskStore: store as never, runId: "CLW-1" });
+    expect(result.status).toBe("completed");
+    expect(status?.metadata?.status).toBe("completed");
+    expect(summary.status).toBe("completed");
+  });
+
   it("writes status documents for blocked and partial generation", async () => {
     const store = new FakeTaskStore();
     const result = await generateCounterLawsuitResearchMemo({ taskStore: store as never, runId: "CLW-1" });
     const statusDoc = await store.getTaskDocument("FN-1", RESEARCH_MEMO_STATUS_DOCUMENT_KEY);
     expect(result.status).toBe("blocked");
     expect(statusDoc?.metadata).toMatchObject({ status: "blocked", memoDocumentKey: RESEARCH_MEMO_DOCUMENT_KEY });
+  });
+
+  it("writes a failed status document with redacted diagnostics when persistence fails", async () => {
+    const store = new FakeTaskStore();
+    seedPrerequisites(store);
+    store.failNextMemoUpsert = true;
+    const result = await generateCounterLawsuitResearchMemo({ taskStore: store as never, runId: "CLW-1" });
+    const statusDoc = await store.getTaskDocument("FN-1", RESEARCH_MEMO_STATUS_DOCUMENT_KEY);
+    const serialized = `${statusDoc?.content}\n${JSON.stringify(statusDoc?.metadata)}`;
+    expect(result.status).toBe("failed");
+    expect(statusDoc?.metadata?.status).toBe("failed");
+    expect(serialized).toContain("research-memo-generation-failed");
+    expect(serialized).not.toContain("super-secret-token-value");
   });
 
   it("redacts secret-like values from memo content and metadata", async () => {

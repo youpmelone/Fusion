@@ -91,6 +91,7 @@ export interface CounterLawsuitResearchMemoResult {
   status: ResearchMemoStatus;
   generatedAt: string;
   taskId?: string;
+  matterName?: string;
   memoDocumentKey: typeof RESEARCH_MEMO_DOCUMENT_KEY;
   statusDocumentKey?: typeof RESEARCH_MEMO_STATUS_DOCUMENT_KEY;
   sourceDocuments: ResearchMemoSourceDocumentSummary[];
@@ -502,6 +503,7 @@ export async function collectCounterLawsuitResearchMemoInputs(options: CollectCo
     status,
     generatedAt,
     taskId: researchMemoTask.id,
+    matterName: typeof researchMemoTask.sourceMetadata?.matterName === "string" ? researchMemoTask.sourceMetadata.matterName : undefined,
     memoDocumentKey: RESEARCH_MEMO_DOCUMENT_KEY,
     statusDocumentKey: status === "completed" ? undefined : RESEARCH_MEMO_STATUS_DOCUMENT_KEY,
     sourceDocuments,
@@ -539,6 +541,10 @@ export function buildResearchMemoManifest(result: CounterLawsuitResearchMemoResu
     generatedAt: result.generatedAt,
     status: result.status,
     sourceDocuments: result.sourceDocuments,
+    evidenceCount: result.evidenceCount,
+    authorityCount: result.authorityCount,
+    conclusionCount: result.conclusionCount,
+    sourcePathCount: result.sourcePathCount,
     searches: result.searches,
     evidence: result.evidence,
     authorities: result.authorities,
@@ -564,6 +570,7 @@ This memo also preserves upstream limits: ${VAULT_MINING_SAFETY_NOTICE} ${COURTL
 
 - Workflow run ID: ${result.runId}
 - Research memo task ID: ${result.taskId ?? "unknown"}
+- Matter name: ${result.matterName ?? "not recorded"}
 - Generated at: ${result.generatedAt}
 - Status: ${result.status}
 
@@ -603,6 +610,27 @@ ${JSON.stringify(manifest, null, 2)}
 `;
 }
 
+function statusDocumentInput(result: CounterLawsuitResearchMemoResult): { key: typeof RESEARCH_MEMO_STATUS_DOCUMENT_KEY; content: string; author: string; metadata: Record<string, unknown> } {
+  return {
+    key: RESEARCH_MEMO_STATUS_DOCUMENT_KEY,
+    content: `# Research memo status\n\nStatus: ${result.status}\n\n${RESEARCH_MEMO_SAFETY_NOTICE}\n\n## Diagnostics\n${formatDiagnostics(result.diagnostics)}\n`,
+    author: "fusion-legal-research-memo",
+    metadata: {
+      workflowKind: COUNTER_LAWSUIT_WORKFLOW_KIND,
+      workflowRunId: result.runId,
+      status: result.status,
+      memoDocumentKey: RESEARCH_MEMO_DOCUMENT_KEY,
+      statusDocumentKey: RESEARCH_MEMO_STATUS_DOCUMENT_KEY,
+      evidenceCount: result.evidenceCount,
+      authorityCount: result.authorityCount,
+      conclusionCount: result.conclusionCount,
+      sourcePathCount: result.sourcePathCount,
+      diagnostics: result.diagnostics,
+      safetyNotice: RESEARCH_MEMO_SAFETY_NOTICE,
+    },
+  };
+}
+
 export async function generateCounterLawsuitResearchMemo(options: GenerateCounterLawsuitResearchMemoOptions): Promise<CounterLawsuitResearchMemoResult> {
   const result = await collectCounterLawsuitResearchMemoInputs(options);
   if (!options.force) {
@@ -610,35 +638,40 @@ export async function generateCounterLawsuitResearchMemo(options: GenerateCounte
     if (existing && result.status === "completed") return result;
   }
 
-  await options.taskStore.upsertTaskDocument(result.taskId ?? "", {
-    key: RESEARCH_MEMO_DOCUMENT_KEY,
-    content: buildResearchMemoMarkdown(result),
-    author: "fusion-legal-research-memo",
-    metadata: buildResearchMemoManifest(result),
-  });
-
-  if (result.status !== "completed") {
+  try {
     await options.taskStore.upsertTaskDocument(result.taskId ?? "", {
-      key: RESEARCH_MEMO_STATUS_DOCUMENT_KEY,
-      content: `# Research memo status\n\nStatus: ${result.status}\n\n${RESEARCH_MEMO_SAFETY_NOTICE}\n\n## Diagnostics\n${formatDiagnostics(result.diagnostics)}\n`,
+      key: RESEARCH_MEMO_DOCUMENT_KEY,
+      content: buildResearchMemoMarkdown(result),
       author: "fusion-legal-research-memo",
-      metadata: {
-        workflowKind: COUNTER_LAWSUIT_WORKFLOW_KIND,
-        workflowRunId: result.runId,
-        status: result.status,
-        memoDocumentKey: RESEARCH_MEMO_DOCUMENT_KEY,
-        statusDocumentKey: RESEARCH_MEMO_STATUS_DOCUMENT_KEY,
-        evidenceCount: result.evidenceCount,
-        authorityCount: result.authorityCount,
-        conclusionCount: result.conclusionCount,
-        sourcePathCount: result.sourcePathCount,
-        diagnostics: result.diagnostics,
-        safetyNotice: RESEARCH_MEMO_SAFETY_NOTICE,
-      },
+      metadata: buildResearchMemoManifest(result),
     });
-  }
 
-  return result;
+    if (result.status !== "completed") {
+      await options.taskStore.upsertTaskDocument(result.taskId ?? "", statusDocumentInput(result));
+    } else {
+      const staleStatus = await options.taskStore.getTaskDocument(result.taskId ?? "", RESEARCH_MEMO_STATUS_DOCUMENT_KEY).catch(() => null);
+      if (staleStatus) {
+        await options.taskStore.upsertTaskDocument(result.taskId ?? "", statusDocumentInput({ ...result, statusDocumentKey: RESEARCH_MEMO_STATUS_DOCUMENT_KEY }));
+      }
+    }
+
+    return result;
+  } catch (error) {
+    const failedResult: CounterLawsuitResearchMemoResult = {
+      ...result,
+      status: "failed",
+      statusDocumentKey: RESEARCH_MEMO_STATUS_DOCUMENT_KEY,
+      diagnostics: normalizeDiagnostics(result.diagnostics, [{
+        code: "research-memo-generation-failed",
+        severity: "error",
+        message: `Research memo generation failed: ${error instanceof Error ? error.message : String(error)}`,
+        sourceDocumentKey: RESEARCH_MEMO_DOCUMENT_KEY,
+        sourceTaskId: result.taskId,
+      }]),
+    };
+    await options.taskStore.upsertTaskDocument(failedResult.taskId ?? "", statusDocumentInput(failedResult));
+    return failedResult;
+  }
 }
 
 export async function deriveResearchMemoStatusForRun(params: {
