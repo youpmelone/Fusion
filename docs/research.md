@@ -65,7 +65,15 @@ Set `researchGlobalWebSearchProvider` in global settings to one of the supported
 
 API keys are stored through Fusion's auth credential pipeline (`/api/auth/api-key`), not in settings JSON directly.
 
-### 3. (Optional) Configure synthesis model
+### 3. (Optional) Enable GitHub research
+
+Set `researchGlobalGitHubEnabled` to `true` to include GitHub as a research source.
+
+Fusion uses the GitHub CLI for this provider, so `gh` must be installed and authenticated with `gh auth login`.
+
+Availability checks for `gh --version` and `gh auth status` are bounded. If either check fails or stalls, the GitHub provider is treated as unavailable instead of blocking a research run or validation suite.
+
+### 4. (Optional) Configure synthesis model
 
 If LLM synthesis is enabled (default: on), set a synthesis provider and model:
 
@@ -430,6 +438,7 @@ When all retries are exhausted, the run transitions to `retry_exhausted`.
 | "Research provider is not configured" | No search provider credentials set | Add API key for your chosen provider in Settings |
 | "Missing API key for {provider}" | Auth credential not found | Configure provider credentials in Settings → Authentication |
 | Run stuck in `queued` | Engine not running or no available concurrency slots | Start the project engine; check `maxConcurrentRuns` |
+| GitHub source unavailable | `researchGlobalGitHubEnabled` is off, `gh` is not installed, `gh auth status` is unauthenticated, or the bounded CLI check timed out | Enable the setting, install `gh`, run `gh auth login`, and retry |
 | Run times out | Provider slow or `maxDurationMs` too low | Increase timeout in project research settings |
 | All retries exhausted | Persistent provider error | Check provider status; create a fresh run |
 | Research view not visible in dashboard | Feature flag disabled | Set `experimentalFeatures.researchView` to `true` |
