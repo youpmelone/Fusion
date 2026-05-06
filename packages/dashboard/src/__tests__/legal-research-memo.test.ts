@@ -231,7 +231,7 @@ describe("research memo generation", () => {
     expect((await store.getTaskDocument("FN-1", RESEARCH_MEMO_STATUS_DOCUMENT_KEY))?.metadata?.status).toBe("blocked");
     seedPrerequisites(store);
     store.setDocument(COURTLISTENER_STATUS_DOCUMENT_KEY, "# status", { status: "completed" });
-    const result = await generateCounterLawsuitResearchMemo({ taskStore: store as never, runId: "CLW-1", force: true });
+    const result = await generateCounterLawsuitResearchMemo({ taskStore: store as never, runId: "CLW-1" });
     const status = await store.getTaskDocument("FN-1", RESEARCH_MEMO_STATUS_DOCUMENT_KEY);
     const summary = await deriveResearchMemoStatusForRun({ taskStore: store as never, runId: "CLW-1" });
     expect(result.status).toBe("completed");

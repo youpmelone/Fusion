@@ -541,10 +541,6 @@ export function buildResearchMemoManifest(result: CounterLawsuitResearchMemoResu
     generatedAt: result.generatedAt,
     status: result.status,
     sourceDocuments: result.sourceDocuments,
-    evidenceCount: result.evidenceCount,
-    authorityCount: result.authorityCount,
-    conclusionCount: result.conclusionCount,
-    sourcePathCount: result.sourcePathCount,
     searches: result.searches,
     evidence: result.evidence,
     authorities: result.authorities,
@@ -633,11 +629,6 @@ function statusDocumentInput(result: CounterLawsuitResearchMemoResult): { key: t
 
 export async function generateCounterLawsuitResearchMemo(options: GenerateCounterLawsuitResearchMemoOptions): Promise<CounterLawsuitResearchMemoResult> {
   const result = await collectCounterLawsuitResearchMemoInputs(options);
-  if (!options.force) {
-    const existing = await options.taskStore.getTaskDocument(result.taskId ?? "", RESEARCH_MEMO_DOCUMENT_KEY).catch(() => null);
-    if (existing && result.status === "completed") return result;
-  }
-
   try {
     await options.taskStore.upsertTaskDocument(result.taskId ?? "", {
       key: RESEARCH_MEMO_DOCUMENT_KEY,
