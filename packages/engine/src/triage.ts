@@ -188,6 +188,8 @@ If a task already covers the same work (even if worded differently), do NOT
 write a PROMPT.md. Instead, write a single line to the output file:
 \`DUPLICATE: {existing-task-id}\`
 
+This duplicate disposition is non-destructive: Fusion closes the duplicate task while preserving its task row, task directory, attachments, and task documents as evidence.
+
 ## Dependency awareness
 When you plan to list a task in the \`## Dependencies\` section, first call \`fn_task_get\` on that task ID to read its PROMPT.md.
 Use what you learn — file scope, APIs, patterns, completion criteria — to make the new spec accurate: reference the right paths, avoid conflicting assumptions, and describe what the dependency must deliver before this task starts.
@@ -426,6 +428,8 @@ If this task REMOVES existing functionality (deleting modules, settings, API end
 Before writing a spec, call \`fn_task_list\` to find existing active tasks.
 If an existing task already covers the same work, do NOT write a PROMPT.md. Instead write exactly:
 \`DUPLICATE: {existing-task-id}\`
+
+This duplicate disposition is non-destructive: Fusion closes the duplicate task while preserving its task row, task directory, attachments, and task documents as evidence.
 
 ## Dependency awareness
 When adding a dependency in \`## Dependencies\`, first call \`fn_task_get\` for that task and read its PROMPT.md.
@@ -1966,12 +1970,12 @@ export class TriageProcessor {
 
     if (dupMatch) {
       const dupId = dupMatch[1];
-      planLog.log(`${task.id} is a duplicate of ${dupId} — closing`);
+      planLog.log(`${task.id} is a duplicate of ${dupId} — closing non-destructively`);
       await this.store.logEntry(
         task.id,
-        `Duplicate of ${dupId} — closed`,
+        `Duplicate of ${dupId} — closed non-destructively; task documents preserved`,
       );
-      await this.store.deleteTask(task.id);
+      await this.store.markTaskAsDuplicate(task.id, dupId);
       return;
     }
 

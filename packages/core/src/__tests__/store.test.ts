@@ -4861,6 +4861,100 @@ Task with acceptance criteria
       await expect(store.deleteTask(targetTask.id)).resolves.toMatchObject({ id: targetTask.id });
     });
 
+    it("markTaskAsDuplicate closes a duplicate non-destructively with canonical metadata", async () => {
+      const canonical = await store.createTask({ description: "Canonical task" });
+      const duplicate = await store.createTask({
+        description: "Duplicate task",
+        source: { sourceType: "api", sourceMetadata: { original: true } },
+      });
+      const dir = join(rootDir, ".fusion", "tasks", duplicate.id);
+      const events: any[] = [];
+      store.on("task:moved", (event: any) => events.push(event));
+
+      const marked = await store.markTaskAsDuplicate(duplicate.id, canonical.id);
+
+      expect(marked).toMatchObject({
+        id: duplicate.id,
+        column: "archived",
+        status: "duplicate",
+      });
+      expect(marked.sourceMetadata).toMatchObject({
+        original: true,
+        duplicateOf: canonical.id,
+        duplicateDisposition: "non-destructive",
+      });
+      expect(typeof marked.sourceMetadata?.duplicateDispositionAt).toBe("string");
+      expect(marked.log.at(-1)?.action).toBe(`Marked as duplicate of ${canonical.id}`);
+      expect(existsSync(dir)).toBe(true);
+      await expect(store.logEntry(duplicate.id, "should be read-only")).rejects.toThrow(/archived/);
+      expect(events.at(-1)).toMatchObject({ from: "triage", to: "archived" });
+    });
+
+    it("markTaskAsDuplicate validates the duplicate target and rejects self-duplicates", async () => {
+      const task = await store.createTask({ description: "Duplicate candidate" });
+
+      await expect(store.markTaskAsDuplicate(task.id, task.id)).rejects.toThrow(
+        `Task ${task.id} cannot be marked as a duplicate of itself`,
+      );
+      await expect(store.markTaskAsDuplicate(task.id, "FN-404")).rejects.toThrow(
+        "Duplicate target FN-404 not found",
+      );
+    });
+
+    it("markTaskAsDuplicate refuses tasks with live dependents", async () => {
+      const canonical = await store.createTask({ description: "Canonical task" });
+      const duplicate = await store.createTask({ description: "Duplicate with dependent" });
+      const dependent = await store.createTask({ description: "Dependent task" });
+      await store.updateTask(dependent.id, { dependencies: [duplicate.id] });
+
+      await expect(store.markTaskAsDuplicate(duplicate.id, canonical.id)).rejects.toBeInstanceOf(
+        TaskHasDependentsError,
+      );
+
+      const stillActive = await store.getTask(duplicate.id);
+      expect(stillActive.column).toBe("triage");
+    });
+
+    it("cleanupArchivedTasks skips evidence-preserving duplicate dispositions", async () => {
+      const canonical = await store.createTask({ description: "Canonical task" });
+      const duplicate = await store.createTask({ description: "Duplicate to preserve" });
+      const dir = join(rootDir, ".fusion", "tasks", duplicate.id);
+
+      await store.markTaskAsDuplicate(duplicate.id, canonical.id);
+
+      const cleaned = await store.cleanupArchivedTasks();
+
+      expect(cleaned).not.toContain(duplicate.id);
+      expect(existsSync(dir)).toBe(true);
+      const stillReadable = await store.getTask(duplicate.id);
+      expect(stillReadable.sourceMetadata?.duplicateOf).toBe(canonical.id);
+    });
+
+    it("startup archive migration skips evidence-preserving duplicate dispositions", async () => {
+      store.close();
+      store = new TaskStore(rootDir, globalDir);
+      await store.init();
+
+      const canonical = await store.createTask({ description: "Canonical disk task" });
+      const duplicate = await store.createTask({ description: "Duplicate disk task" });
+      await store.upsertTaskDocument(duplicate.id, { key: "evidence", content: "keep me" });
+      await store.markTaskAsDuplicate(duplicate.id, canonical.id);
+      const dir = join(rootDir, ".fusion", "tasks", duplicate.id);
+
+      store.close();
+      store = new TaskStore(rootDir, globalDir);
+      await store.init();
+
+      const restored = await store.getTask(duplicate.id);
+      expect(restored.column).toBe("archived");
+      expect(restored.status).toBe("duplicate");
+      expect(restored.sourceMetadata?.duplicateOf).toBe(canonical.id);
+      expect(existsSync(dir)).toBe(true);
+      await expect(store.getTaskDocument(duplicate.id, "evidence")).resolves.toMatchObject({
+        content: "keep me",
+      });
+    });
+
     it("deleting a task cascades agent log entry deletion", async () => {
       const task = await createTestTask();
       await store.appendAgentLog(task.id, "cascade me", "text");

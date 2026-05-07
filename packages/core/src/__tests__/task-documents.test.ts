@@ -293,6 +293,27 @@ describe("TaskStore task documents", () => {
     expect(document).toBeNull();
   }, 15_000);
 
+  it("keeps task documents readable after duplicate disposition", async () => {
+    const canonical = await store.createTask({ description: "Canonical task" });
+    const duplicate = await store.createTask({ description: "Duplicate task" });
+    await store.upsertTaskDocument(duplicate.id, { key: "evidence", content: "Preserved evidence" });
+
+    await store.markTaskAsDuplicate(duplicate.id, canonical.id);
+
+    const documents = await store.getTaskDocuments(duplicate.id);
+    expect(documents).toHaveLength(1);
+    expect(documents[0]).toMatchObject({
+      key: "evidence",
+      content: "Preserved evidence",
+    });
+
+    const document = await store.getTaskDocument(duplicate.id, "evidence");
+    expect(document?.content).toBe("Preserved evidence");
+    await expect(
+      store.upsertTaskDocument(duplicate.id, { key: "evidence", content: "should fail" }),
+    ).rejects.toThrow(/archived/i);
+  });
+
   it("accepts valid key edge cases and rejects invalid ones", async () => {
     const task = await store.createTask({ description: "Key edge case task" });
 

@@ -119,6 +119,18 @@ Completion gating treats dependencies as resolved only when the dependency task 
 
 Auto-merge recovery follow-up creation is deduplicated: Fusion creates at most one active (`not done/archived`) recovery task per unresolved parent failure, and merge-conflict recovery also deduplicates by active branch ownership to prevent parallel duplicate follow-ups on the same conflict branch.
 
+### Duplicate disposition vs deletion
+
+When triage writes `DUPLICATE: <task-id>`, Fusion now closes the duplicate task non-destructively.
+
+The duplicate moves to `archived` with `status: "duplicate"`, and `sourceMetadata` records `duplicateOf`, `duplicateDisposition`, and `duplicateDispositionAt` so the canonical task is readable later.
+
+This path preserves the task row, task directory, attachments, and task documents. It is the right default when a duplicate task contains investigation notes, evidence, plans, or any other context that may need to be audited later.
+
+Intentional task deletion is different. `deleteTask()` and `fn_task_delete` are destructive: they remove the task row and directory, and SQLite foreign keys cascade-delete task documents and document revisions.
+
+Use destructive duplicate deletion only when the duplicate has no evidence worth preserving, or after all documents, attachments, notes, and other evidence have already been copied to a durable non-deleting task document or another durable location.
+
 ## Task Execution Modes
 
 Each task has an execution mode that controls how the executor agent approaches the task:

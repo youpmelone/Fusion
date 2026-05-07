@@ -340,6 +340,8 @@ If a task already covers the same work (even if worded differently), do NOT
 write a PROMPT.md. Instead, write a single line to the output file:
 \`DUPLICATE: {existing-task-id}\`
 
+This duplicate disposition is non-destructive: Fusion closes the duplicate task while preserving its task row, task directory, attachments, and task documents as evidence.
+
 ## Dependency awareness
 When you plan to list a task in the \`## Dependencies\` section, first call \`fn_task_get\` on that task ID to read its PROMPT.md.
 Use what you learn — file scope, APIs, patterns, completion criteria — to make the new spec accurate: reference the right paths, avoid conflicting assumptions, and describe what the dependency must deliver before this task starts.

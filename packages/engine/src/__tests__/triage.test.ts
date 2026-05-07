@@ -66,6 +66,7 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     createTask: vi.fn(),
     moveTask: vi.fn(),
     updateTask: vi.fn().mockResolvedValue(undefined),
+    markTaskAsDuplicate: vi.fn().mockResolvedValue(undefined),
     deleteTask: vi.fn(),
     mergeTask: vi.fn(),
     getSettings: vi.fn().mockResolvedValue({
@@ -931,6 +932,24 @@ describe("TriageProcessor", () => {
     // Should not throw
   });
 
+  it("finalizes fresh duplicate specs through non-destructive duplicate disposition", async () => {
+    const task = createTriageTask({ id: "FN-123" });
+
+    await (processor as any).finalizeApprovedTask(
+      task,
+      "DUPLICATE: FN-042\n",
+      { requirePlanApproval: false } as Settings,
+    );
+
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-123",
+      "Duplicate of FN-042 — closed non-destructively; task documents preserved",
+    );
+    expect(store.markTaskAsDuplicate).toHaveBeenCalledWith("FN-123", "FN-042");
+    expect(store.deleteTask).not.toHaveBeenCalled();
+    expect(store.moveTask).not.toHaveBeenCalled();
+  });
+
   it("handles settings:updated event for globalPause", () => {
     const handler = vi.fn();
     (store.on as ReturnType<typeof vi.fn>).mockImplementation(
@@ -1363,6 +1382,40 @@ describe("approved triage recovery", () => {
       "FN-001",
       "Auto-recovered approved specification stuck in planning — moved to todo",
     );
+  });
+
+  it("routes recovered approved duplicate specs through non-destructive duplicate disposition", async () => {
+    await writeFile(join(rootDir, ".fusion", "tasks", "FN-001", "PROMPT.md"), "DUPLICATE: FN-029\n");
+
+    const store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({
+        maxConcurrent: 2,
+        maxWorktrees: 4,
+        pollIntervalMs: 10000,
+        groupOverlappingFiles: false,
+        autoMerge: true,
+        requirePlanApproval: false,
+      } as Settings),
+    });
+
+    const processor = new TriageProcessor(store, rootDir);
+    const recovered = await processor.recoverApprovedTask({
+      id: "FN-001",
+      description: "Recovered duplicate task",
+      column: "triage",
+      status: "planning",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [{ timestamp: "2026-01-01T00:00:00.000Z", action: "Spec review: APPROVE" }],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:02:00.000Z",
+    });
+
+    expect(recovered).toBe(true);
+    expect(store.markTaskAsDuplicate).toHaveBeenCalledWith("FN-001", "FN-029");
+    expect(store.deleteTask).not.toHaveBeenCalled();
+    expect(store.moveTask).not.toHaveBeenCalled();
   });
 
   it("updates malformed metadata title from prompt heading when task ID matches", async () => {
