@@ -218,6 +218,20 @@ describe("red-team report input collection", () => {
     expect(summary).toMatchObject({ status: "failed", findingCount: 0, unresolvedBlockerCount: 1, redTeamReportDocumentKey: RED_TEAM_REPORT_DOCUMENT_KEY });
   });
 
+  it("does not mark malformed primary red-team manifests as completed", async () => {
+    const store = new FakeTaskStore();
+    const malformedManifest = {
+      runId: "CLW-1",
+      counts: { findings: 1, mtdAttacks: 0, citationIssues: 0, revisionRecommendations: 0, unresolvedBlockers: 0, reviewedParagraphs: 1, reviewedClaims: 1 },
+      diagnostics: [],
+    };
+    store.setDocument("FN-5", RED_TEAM_REPORT_DOCUMENT_KEY, `# report\n\n\`\`\`json\n${JSON.stringify(malformedManifest)}\n\`\`\``, malformedManifest);
+    const summary = await deriveRedTeamReportStatusForRun({ taskStore: store as never, runId: "CLW-1" });
+    expect(summary.status).toBe("failed");
+    expect(summary.unresolvedBlockerCount).toBe(1);
+    expect(summary.diagnostics.map((diagnostic) => diagnostic.code)).toContain("malformed-manifest");
+  });
+
   it("keeps count derivation deterministic and source paths de-duplicated", async () => {
     const store = new FakeTaskStore();
     seedComplaint(store, { manifest: complaintManifest({ counts: undefined }) });

@@ -13,6 +13,12 @@ export const RED_TEAM_REPORT_SAFETY_NOTICE = "Draft-only opposing-counsel red-te
 
 export type RedTeamStatus = "completed" | "partial" | "blocked" | "failed" | "stale" | "not-run";
 export type RedTeamSeverity = "info" | "warning" | "high" | "blocker";
+
+const RED_TEAM_STATUSES = new Set<RedTeamStatus>(["completed", "partial", "blocked", "failed", "stale", "not-run"]);
+
+function isRedTeamStatus(value: unknown): value is RedTeamStatus {
+  return typeof value === "string" && RED_TEAM_STATUSES.has(value as RedTeamStatus);
+}
 export type RedTeamFindingCategory =
   | "pleading-weakness"
   | "motion-to-dismiss-risk"
@@ -907,26 +913,37 @@ export async function generateCounterLawsuitRedTeamReport(options: GenerateCount
 
 function summaryFromManifest(params: { runId: string; manifest: Record<string, unknown>; statusDocPresent: boolean }): CounterLawsuitRedTeamReportSummary {
   const counts = asRecord(params.manifest.counts);
-  const diagnostics = normalizeDiagnostics(manifestArray(params.manifest, ["diagnostics"]).map((record) => ({
-    code: boundedText(record.code, 180) ?? "diagnostic",
-    severity: record.severity === "error" || record.severity === "warning" || record.severity === "info" ? record.severity : "warning",
-    message: boundedText(record.message, 500) ?? "Red-team diagnostic requires review.",
-    sourceDocumentKey: boundedText(record.sourceDocumentKey, 180),
-    sourceTaskId: boundedText(record.sourceTaskId, 180),
-    paragraphId: boundedText(record.paragraphId, 180),
-    claimDraftId: boundedText(record.claimDraftId, 180),
-    findingId: boundedText(record.findingId, 180),
-  })));
+  const manifestStatus = isRedTeamStatus(params.manifest.status) ? params.manifest.status : undefined;
+  const malformedStatus = !manifestStatus;
+  const diagnostics = normalizeDiagnostics([
+    ...manifestArray(params.manifest, ["diagnostics"]).map((record) => ({
+      code: boundedText(record.code, 180) ?? "diagnostic",
+      severity: (record.severity === "error" || record.severity === "warning" || record.severity === "info" ? record.severity : "warning") as RedTeamDiagnostic["severity"],
+      message: boundedText(record.message, 500) ?? "Red-team diagnostic requires review.",
+      sourceDocumentKey: boundedText(record.sourceDocumentKey, 180),
+      sourceTaskId: boundedText(record.sourceTaskId, 180),
+      paragraphId: boundedText(record.paragraphId, 180),
+      claimDraftId: boundedText(record.claimDraftId, 180),
+      findingId: boundedText(record.findingId, 180),
+    })),
+    ...(malformedStatus ? [{
+      code: "malformed-manifest",
+      severity: "error" as const,
+      message: "Red-team report manifest is missing a valid status; treating the persisted report as failed instead of completed.",
+      sourceDocumentKey: RED_TEAM_REPORT_DOCUMENT_KEY,
+    }] : []),
+  ]);
+  const unresolvedBlockerCount = typeof counts?.unresolvedBlockers === "number" ? counts.unresolvedBlockers : 0;
   return {
     runId: params.runId,
-    status: typeof params.manifest.status === "string" ? params.manifest.status as RedTeamStatus : "completed",
+    status: manifestStatus ?? "failed",
     redTeamReportDocumentKey: RED_TEAM_REPORT_DOCUMENT_KEY,
     statusDocumentKey: params.statusDocPresent ? RED_TEAM_REPORT_STATUS_DOCUMENT_KEY : undefined,
     findingCount: typeof counts?.findings === "number" ? counts.findings : manifestArray(params.manifest, ["findings"]).length,
     mtdAttackCount: typeof counts?.mtdAttacks === "number" ? counts.mtdAttacks : manifestArray(params.manifest, ["mtdAttacks"]).length,
     citationIssueCount: typeof counts?.citationIssues === "number" ? counts.citationIssues : manifestArray(params.manifest, ["citationIssues"]).length,
     revisionRecommendationCount: typeof counts?.revisionRecommendations === "number" ? counts.revisionRecommendations : manifestArray(params.manifest, ["revisionRecommendations"]).length,
-    unresolvedBlockerCount: typeof counts?.unresolvedBlockers === "number" ? counts.unresolvedBlockers : 0,
+    unresolvedBlockerCount: malformedStatus ? Math.max(unresolvedBlockerCount, 1) : unresolvedBlockerCount,
     reviewedParagraphCount: typeof counts?.reviewedParagraphs === "number" ? counts.reviewedParagraphs : 0,
     reviewedClaimCount: typeof counts?.reviewedClaims === "number" ? counts.reviewedClaims : 0,
     diagnostics,
@@ -967,7 +984,7 @@ export async function deriveRedTeamReportStatusForRun(params: {
     const statusManifest = parseManifestFromDocument(statusDoc, RED_TEAM_REPORT_STATUS_DOCUMENT_KEY).manifest ?? {};
     return {
       ...notRunSummary(params.runId, RED_TEAM_REPORT_STATUS_DOCUMENT_KEY),
-      status: typeof statusManifest.status === "string" ? statusManifest.status as RedTeamStatus : "failed",
+      status: isRedTeamStatus(statusManifest.status) ? statusManifest.status : "failed",
       redTeamReportDocumentKey: doc ? RED_TEAM_REPORT_DOCUMENT_KEY : undefined,
       findingCount: typeof statusManifest.findingCount === "number" ? statusManifest.findingCount : 0,
       mtdAttackCount: typeof statusManifest.mtdAttackCount === "number" ? statusManifest.mtdAttackCount : 0,
